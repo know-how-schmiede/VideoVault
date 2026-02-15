@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
+import sys
 import threading
 from dataclasses import dataclass
 from datetime import datetime
@@ -190,6 +192,7 @@ class VideoVaultApp(ctk.CTk):
         self.row_to_entry: dict[int, VideoEntry] = {}
         self.is_scanning = False
         self.last_scan_at: str | None = None
+        self.details_link_tags: list[str] = []
 
         self.duplicate_by_size_var = ctk.BooleanVar(value=False)
         self.status_var = ctk.StringVar(value="Bereit")
@@ -534,28 +537,86 @@ class VideoVaultApp(ctk.CTk):
         if entry is None:
             return
 
-        lines = [
+        self._show_video_details(entry)
+
+    def _show_video_details(self, entry: VideoEntry) -> None:
+        self._clear_details_box()
+
+        header_lines = [
             f"Titel: {self._get_video_title(entry)}",
             f"Dateiname: {entry.name}",
             f"Treffer: {len(entry.paths)}",
             f"Duplikat: {'Ja' if entry.is_duplicate else 'Nein'}",
             "",
-            "Gefundene Pfade:",
+            "Gefundene Pfade (klickbar):",
         ]
+        self.details_box.insert("1.0", "\n".join(header_lines) + "\n")
 
         for idx, path in enumerate(entry.paths, start=1):
             size_text = ""
             if idx - 1 < len(entry.sizes):
                 size_text = f" ({self._format_size(entry.sizes[idx - 1])})"
-            lines.append(f"{idx}. {path}{size_text}")
 
-        self._set_details_text("\n".join(lines))
+            self.details_box.insert(END, f"{idx}. ")
+            start = self.details_box.index(END)
+            self.details_box.insert(END, path)
+            end = self.details_box.index(END)
+
+            tag_name = f"path_link_{idx}"
+            self.details_link_tags.append(tag_name)
+            self.details_box.tag_add(tag_name, start, end)
+            self.details_box.tag_config(tag_name, foreground="#2563eb", underline=1)
+            self.details_box.tag_bind(
+                tag_name,
+                "<Button-1>",
+                lambda _event, selected_path=path: self._open_video_path(selected_path),
+            )
+            self.details_box.tag_bind(
+                tag_name,
+                "<Enter>",
+                lambda _event: self.details_box.configure(cursor="hand2"),
+            )
+            self.details_box.tag_bind(
+                tag_name,
+                "<Leave>",
+                lambda _event: self.details_box.configure(cursor="xterm"),
+            )
+            self.details_box.insert(END, f"{size_text}\n")
+
+        self.details_box.configure(state="disabled")
 
     def _set_details_text(self, text: str) -> None:
-        self.details_box.configure(state="normal")
-        self.details_box.delete("1.0", END)
+        self._clear_details_box()
         self.details_box.insert("1.0", text)
         self.details_box.configure(state="disabled")
+
+    def _clear_details_box(self) -> None:
+        self.details_box.configure(state="normal")
+        self.details_box.configure(cursor="xterm")
+        for tag_name in self.details_link_tags:
+            self.details_box.tag_delete(tag_name)
+        self.details_link_tags.clear()
+        self.details_box.delete("1.0", END)
+
+    @staticmethod
+    def _open_video_path(path: str) -> None:
+        normalized_path = os.path.abspath(path)
+        if not os.path.isfile(normalized_path):
+            messagebox.showerror("Datei nicht gefunden", f"Datei nicht gefunden:\n{normalized_path}")
+            return
+
+        try:
+            if os.name == "nt":
+                os.startfile(normalized_path)  # type: ignore[attr-defined]
+            elif sys.platform == "darwin":
+                subprocess.Popen(["open", normalized_path])
+            else:
+                subprocess.Popen(["xdg-open", normalized_path])
+        except OSError as exc:
+            messagebox.showerror(
+                "Oeffnen fehlgeschlagen",
+                f"Die Datei konnte nicht geoeffnet werden:\n{normalized_path}\n\n{exc}",
+            )
 
     def _update_statistics(self) -> None:
         found_videos = len(self.video_entries)

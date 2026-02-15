@@ -6,6 +6,7 @@ Dieses Dokument beschreibt die veroeffentlichten Versionen von VideoVault.
 
 | Version | Datum       | Beschreibung |
 |---------|-------------|--------------|
+| 0.3.0   | 2026-02-15  | Im Bereich `Details` sind die `Gefundenen Pfade` nun klickbar; ein Klick oeffnet das Video mit dem im Betriebssystem verknuepften Standard-Videoplayer. |
 | 0.2.0   | 2026-02-15  | Statistikbereich unter `Details` hinzugefuegt (gefundene Videos, letzter Scan, gefundene Duplikate), Listeneintraege ohne Trefferzaehler und ohne Duplikat-Praefix, Duplikate nur noch rot markiert, Persistenz des letzten Scan-Zeitpunkts. |
 | 0.1.0   | 2026-02-15  | Erstrelease mit GUI, Verzeichnisverwaltung, rekursivem Video-Scan, Duplikat-Markierung, Detailansicht und JSON-Persistenz. |
 
