@@ -57,18 +57,19 @@ class JsonStore:
     def __init__(self, file_path: Path) -> None:
         self.file_path = file_path
 
-    def load(self) -> tuple[list[str], bool, str | None, list[VideoEntry]]:
+    def load(self) -> tuple[list[str], bool, bool, str | None, list[VideoEntry]]:
         if not self.file_path.exists():
-            return [], False, None, []
+            return [], False, False, None, []
 
         try:
             with self.file_path.open("r", encoding="utf-8") as handle:
                 payload = json.load(handle)
         except (OSError, json.JSONDecodeError):
-            return [], False, None, []
+            return [], False, False, None, []
 
         raw_dirs = payload.get("directories", [])
         duplicate_by_size = bool(payload.get("duplicate_by_size", False))
+        duplicate_by_parent_dir = bool(payload.get("duplicate_by_parent_dir", False))
         raw_last_scan_at = payload.get("last_scan_at")
         raw_videos = payload.get("videos", [])
         last_scan_at = raw_last_scan_at if isinstance(raw_last_scan_at, str) else None
@@ -82,18 +83,20 @@ class JsonStore:
                     if entry is not None:
                         videos.append(entry)
 
-        return directories, duplicate_by_size, last_scan_at, videos
+        return directories, duplicate_by_size, duplicate_by_parent_dir, last_scan_at, videos
 
     def save(
         self,
         directories: list[str],
         duplicate_by_size: bool,
+        duplicate_by_parent_dir: bool,
         last_scan_at: str | None,
         videos: list[VideoEntry],
     ) -> None:
         payload = {
             "directories": directories,
             "duplicate_by_size": duplicate_by_size,
+            "duplicate_by_parent_dir": duplicate_by_parent_dir,
             "last_scan_at": last_scan_at,
             "videos": [video.to_dict() for video in videos],
         }
@@ -109,7 +112,7 @@ class VideoScanner:
     VIDEO_EXTENSIONS = {".mp4", ".mkv", ".avi", ".mov"}
 
     def scan(
-        self, directories: list[str], duplicate_by_size: bool
+        self, directories: list[str], duplicate_by_size: bool, duplicate_by_parent_dir: bool
     ) -> tuple[list[VideoEntry], list[str]]:
         grouped: dict[tuple[str, int | None], dict[str, object]] = {}
         warnings: list[str] = []
@@ -139,7 +142,13 @@ class VideoScanner:
                         warnings.append(f"Datei nicht lesbar: {full_path}")
                         continue
 
-                    key = (filename.lower(), size if duplicate_by_size else None)
+                    if duplicate_by_parent_dir:
+                        parent_dir_name = os.path.basename(root).strip().lower()
+                        key_name = parent_dir_name if parent_dir_name else filename.lower()
+                    else:
+                        key_name = filename.lower()
+
+                    key = (key_name, size if duplicate_by_size else None)
                     if key not in grouped:
                         grouped[key] = {"name": filename, "items": []}
 
@@ -192,9 +201,10 @@ class VideoVaultApp(ctk.CTk):
         self.row_to_entry: dict[int, VideoEntry] = {}
         self.is_scanning = False
         self.last_scan_at: str | None = None
-        self.details_link_tags: list[str] = []
+        self.details_link_tags: dict[str, str] = {}
 
         self.duplicate_by_size_var = ctk.BooleanVar(value=False)
+        self.duplicate_by_parent_dir_var = ctk.BooleanVar(value=False)
         self.status_var = ctk.StringVar(value="Bereit")
         self.stats_videos_var = ctk.StringVar(value="0")
         self.stats_last_scan_var = ctk.StringVar(value="Nie")
@@ -215,6 +225,7 @@ class VideoVaultApp(ctk.CTk):
         top_bar.grid_columnconfigure(0, weight=1)
         top_bar.grid_columnconfigure(1, weight=0)
         top_bar.grid_columnconfigure(2, weight=0)
+        top_bar.grid_columnconfigure(3, weight=0)
 
         status_label = ctk.CTkLabel(top_bar, textvariable=self.status_var, anchor="w")
         status_label.grid(row=0, column=0, padx=(12, 8), pady=12, sticky="ew")
@@ -229,6 +240,16 @@ class VideoVaultApp(ctk.CTk):
         )
         self.duplicate_checkbox.grid(row=0, column=1, padx=8, pady=12, sticky="e")
 
+        self.duplicate_parent_checkbox = ctk.CTkCheckBox(
+            top_bar,
+            text="Duplikat-Basis: uebergeordnetes Verzeichnis",
+            variable=self.duplicate_by_parent_dir_var,
+            onvalue=True,
+            offvalue=False,
+            command=self._on_duplicate_mode_changed,
+        )
+        self.duplicate_parent_checkbox.grid(row=0, column=2, padx=8, pady=12, sticky="e")
+
         self.scan_button = ctk.CTkButton(
             top_bar,
             text="Scan",
@@ -237,7 +258,7 @@ class VideoVaultApp(ctk.CTk):
             font=ctk.CTkFont(size=17, weight="bold"),
             command=self.start_scan,
         )
-        self.scan_button.grid(row=0, column=2, padx=(8, 12), pady=12, sticky="e")
+        self.scan_button.grid(row=0, column=3, padx=(8, 12), pady=12, sticky="e")
 
         self._build_sources_panel()
         self._build_video_panel()
@@ -336,6 +357,10 @@ class VideoVaultApp(ctk.CTk):
 
         self.details_box = ctk.CTkTextbox(panel, wrap="word")
         self.details_box.grid(row=1, column=0, padx=12, pady=(0, 8), sticky="nsew")
+        self.details_box.bind("<Button-1>", self._on_details_click, add="+")
+        self.details_box.bind("<Motion>", self._on_details_hover, add="+")
+        self.details_box.bind("<Leave>", self._on_details_leave, add="+")
+        self.details_box.bind("<Key>", lambda _event: "break")
         self._set_details_text("Waehle ein Video, um die gefundenen Pfade anzuzeigen.")
 
         ctk.CTkLabel(panel, text="Statistik").grid(row=2, column=0, padx=12, pady=(0, 6), sticky="w")
@@ -364,8 +389,9 @@ class VideoVaultApp(ctk.CTk):
         )
 
     def _load_saved_state(self) -> None:
-        directories, duplicate_by_size, last_scan_at, videos = self.store.load()
+        directories, duplicate_by_size, duplicate_by_parent_dir, last_scan_at, videos = self.store.load()
         self.duplicate_by_size_var.set(duplicate_by_size)
+        self.duplicate_by_parent_dir_var.set(duplicate_by_parent_dir)
         self.last_scan_at = last_scan_at
 
         for directory in directories:
@@ -437,6 +463,7 @@ class VideoVaultApp(ctk.CTk):
         self.remove_button.configure(state=state)
         self.clear_button.configure(state=state)
         self.duplicate_checkbox.configure(state=state)
+        self.duplicate_parent_checkbox.configure(state=state)
         self.directory_entry.configure(state=state)
 
     def start_scan(self) -> None:
@@ -453,16 +480,21 @@ class VideoVaultApp(ctk.CTk):
         self.status_var.set("Scan laeuft ...")
 
         duplicate_by_size = self.duplicate_by_size_var.get()
+        duplicate_by_parent_dir = self.duplicate_by_parent_dir_var.get()
         worker = threading.Thread(
             target=self._scan_worker,
-            args=(directories, duplicate_by_size),
+            args=(directories, duplicate_by_size, duplicate_by_parent_dir),
             daemon=True,
         )
         worker.start()
 
-    def _scan_worker(self, directories: list[str], duplicate_by_size: bool) -> None:
+    def _scan_worker(
+        self, directories: list[str], duplicate_by_size: bool, duplicate_by_parent_dir: bool
+    ) -> None:
         try:
-            videos, warnings = self.scanner.scan(directories, duplicate_by_size)
+            videos, warnings = self.scanner.scan(
+                directories, duplicate_by_size, duplicate_by_parent_dir
+            )
         except Exception as exc:  # pragma: no cover
             self.after(0, lambda: self._scan_failed(str(exc)))
             return
@@ -558,45 +590,58 @@ class VideoVaultApp(ctk.CTk):
                 size_text = f" ({self._format_size(entry.sizes[idx - 1])})"
 
             self.details_box.insert(END, f"{idx}. ")
-            start = self.details_box.index(END)
+            start = self.details_box.index("end-1c")
             self.details_box.insert(END, path)
-            end = self.details_box.index(END)
+            end = self.details_box.index("end-1c")
 
             tag_name = f"path_link_{idx}"
-            self.details_link_tags.append(tag_name)
+            self.details_link_tags[tag_name] = path
             self.details_box.tag_add(tag_name, start, end)
             self.details_box.tag_config(tag_name, foreground="#2563eb", underline=1)
-            self.details_box.tag_bind(
-                tag_name,
-                "<Button-1>",
-                lambda _event, selected_path=path: self._open_video_path(selected_path),
-            )
-            self.details_box.tag_bind(
-                tag_name,
-                "<Enter>",
-                lambda _event: self.details_box.configure(cursor="hand2"),
-            )
-            self.details_box.tag_bind(
-                tag_name,
-                "<Leave>",
-                lambda _event: self.details_box.configure(cursor="xterm"),
-            )
             self.details_box.insert(END, f"{size_text}\n")
-
-        self.details_box.configure(state="disabled")
 
     def _set_details_text(self, text: str) -> None:
         self._clear_details_box()
         self.details_box.insert("1.0", text)
-        self.details_box.configure(state="disabled")
 
     def _clear_details_box(self) -> None:
-        self.details_box.configure(state="normal")
         self.details_box.configure(cursor="xterm")
         for tag_name in self.details_link_tags:
             self.details_box.tag_delete(tag_name)
         self.details_link_tags.clear()
         self.details_box.delete("1.0", END)
+
+    def _on_details_click(self, event: object) -> str | None:
+        if not hasattr(event, "x") or not hasattr(event, "y"):
+            return None
+
+        index = self.details_box.index(f"@{event.x},{event.y}")
+        path = self._get_path_by_text_index(index)
+        if path is None:
+            return None
+
+        self._open_video_path(path)
+        return "break"
+
+    def _on_details_hover(self, event: object) -> None:
+        if not hasattr(event, "x") or not hasattr(event, "y"):
+            return
+
+        index = self.details_box.index(f"@{event.x},{event.y}")
+        if self._get_path_by_text_index(index):
+            self.details_box.configure(cursor="hand2")
+        else:
+            self.details_box.configure(cursor="xterm")
+
+    def _on_details_leave(self, _event: object) -> None:
+        self.details_box.configure(cursor="xterm")
+
+    def _get_path_by_text_index(self, index: str) -> str | None:
+        for tag_name in self.details_box.tag_names(index):
+            selected_path = self.details_link_tags.get(tag_name)
+            if selected_path:
+                return selected_path
+        return None
 
     @staticmethod
     def _open_video_path(path: str) -> None:
@@ -648,6 +693,7 @@ class VideoVaultApp(ctk.CTk):
         self.store.save(
             directories=self._get_directories(),
             duplicate_by_size=self.duplicate_by_size_var.get(),
+            duplicate_by_parent_dir=self.duplicate_by_parent_dir_var.get(),
             last_scan_at=self.last_scan_at,
             videos=self.video_entries,
         )
