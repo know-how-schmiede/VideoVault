@@ -4,6 +4,7 @@ import json
 import os
 import threading
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from tkinter import END, Listbox, SINGLE, filedialog, messagebox
 
@@ -54,19 +55,21 @@ class JsonStore:
     def __init__(self, file_path: Path) -> None:
         self.file_path = file_path
 
-    def load(self) -> tuple[list[str], bool, list[VideoEntry]]:
+    def load(self) -> tuple[list[str], bool, str | None, list[VideoEntry]]:
         if not self.file_path.exists():
-            return [], False, []
+            return [], False, None, []
 
         try:
             with self.file_path.open("r", encoding="utf-8") as handle:
                 payload = json.load(handle)
         except (OSError, json.JSONDecodeError):
-            return [], False, []
+            return [], False, None, []
 
         raw_dirs = payload.get("directories", [])
         duplicate_by_size = bool(payload.get("duplicate_by_size", False))
+        raw_last_scan_at = payload.get("last_scan_at")
         raw_videos = payload.get("videos", [])
+        last_scan_at = raw_last_scan_at if isinstance(raw_last_scan_at, str) else None
 
         directories = [item for item in raw_dirs if isinstance(item, str)]
         videos: list[VideoEntry] = []
@@ -77,17 +80,19 @@ class JsonStore:
                     if entry is not None:
                         videos.append(entry)
 
-        return directories, duplicate_by_size, videos
+        return directories, duplicate_by_size, last_scan_at, videos
 
     def save(
         self,
         directories: list[str],
         duplicate_by_size: bool,
+        last_scan_at: str | None,
         videos: list[VideoEntry],
     ) -> None:
         payload = {
             "directories": directories,
             "duplicate_by_size": duplicate_by_size,
+            "last_scan_at": last_scan_at,
             "videos": [video.to_dict() for video in videos],
         }
         try:
@@ -184,9 +189,13 @@ class VideoVaultApp(ctk.CTk):
         self.video_entries: list[VideoEntry] = []
         self.row_to_entry: dict[int, VideoEntry] = {}
         self.is_scanning = False
+        self.last_scan_at: str | None = None
 
         self.duplicate_by_size_var = ctk.BooleanVar(value=False)
         self.status_var = ctk.StringVar(value="Bereit")
+        self.stats_videos_var = ctk.StringVar(value="0")
+        self.stats_last_scan_var = ctk.StringVar(value="Nie")
+        self.stats_duplicates_var = ctk.StringVar(value="0")
 
         self._build_layout()
         self._load_saved_state()
@@ -318,16 +327,43 @@ class VideoVaultApp(ctk.CTk):
         panel.grid(row=1, column=2, padx=(0, 12), pady=(0, 12), sticky="nsew")
         panel.grid_columnconfigure(0, weight=1)
         panel.grid_rowconfigure(1, weight=1)
+        panel.grid_rowconfigure(3, weight=0)
 
         ctk.CTkLabel(panel, text="Details").grid(row=0, column=0, padx=12, pady=(12, 8), sticky="w")
 
         self.details_box = ctk.CTkTextbox(panel, wrap="word")
-        self.details_box.grid(row=1, column=0, padx=12, pady=(0, 12), sticky="nsew")
+        self.details_box.grid(row=1, column=0, padx=12, pady=(0, 8), sticky="nsew")
         self._set_details_text("Waehle ein Video, um die gefundenen Pfade anzuzeigen.")
 
+        ctk.CTkLabel(panel, text="Statistik").grid(row=2, column=0, padx=12, pady=(0, 6), sticky="w")
+
+        stats_frame = ctk.CTkFrame(panel)
+        stats_frame.grid(row=3, column=0, padx=12, pady=(0, 12), sticky="ew")
+        stats_frame.grid_columnconfigure(0, weight=1)
+
+        ctk.CTkLabel(stats_frame, text="Gefundene Videos:").grid(
+            row=0, column=0, padx=10, pady=(10, 4), sticky="w"
+        )
+        ctk.CTkLabel(stats_frame, textvariable=self.stats_videos_var).grid(
+            row=0, column=1, padx=10, pady=(10, 4), sticky="e"
+        )
+        ctk.CTkLabel(stats_frame, text="Letzter Scan:").grid(
+            row=1, column=0, padx=10, pady=4, sticky="w"
+        )
+        ctk.CTkLabel(stats_frame, textvariable=self.stats_last_scan_var).grid(
+            row=1, column=1, padx=10, pady=4, sticky="e"
+        )
+        ctk.CTkLabel(stats_frame, text="Gefundene Duplikate:").grid(
+            row=2, column=0, padx=10, pady=(4, 10), sticky="w"
+        )
+        ctk.CTkLabel(stats_frame, textvariable=self.stats_duplicates_var).grid(
+            row=2, column=1, padx=10, pady=(4, 10), sticky="e"
+        )
+
     def _load_saved_state(self) -> None:
-        directories, duplicate_by_size, videos = self.store.load()
+        directories, duplicate_by_size, last_scan_at, videos = self.store.load()
         self.duplicate_by_size_var.set(duplicate_by_size)
+        self.last_scan_at = last_scan_at
 
         for directory in directories:
             self._add_directory(directory, must_exist=False, save=False)
@@ -441,6 +477,7 @@ class VideoVaultApp(ctk.CTk):
         self._set_controls_state(True)
 
         self.video_entries = videos
+        self.last_scan_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         self._refresh_video_list()
         self._save_state()
 
@@ -465,7 +502,7 @@ class VideoVaultApp(ctk.CTk):
             self.video_listbox.insert(END, label)
             if item.is_duplicate:
                 try:
-                    self.video_listbox.itemconfig(row, fg="#d97706")
+                    self.video_listbox.itemconfig(row, fg="#dc2626")
                 except Exception:
                     pass
             self.row_to_entry[row] = item
@@ -474,6 +511,7 @@ class VideoVaultApp(ctk.CTk):
             self._set_details_text("Keine Videos vorhanden. Starte einen Scan.")
         else:
             self._set_details_text("Waehle ein Video, um die gefundenen Pfade anzuzeigen.")
+        self._update_statistics()
 
     def _format_video_label(self, item: VideoEntry) -> str:
         title = self._get_video_title(item)
@@ -484,8 +522,7 @@ class VideoVaultApp(ctk.CTk):
             else:
                 title = f"{title} (mehrere Groessen)"
 
-        prefix = "[Duplikat] " if item.is_duplicate else ""
-        return f"{prefix}{title} | {len(item.paths)} Treffer"
+        return title
 
     def _on_video_selected(self, _event: object) -> None:
         selection = self.video_listbox.curselection()
@@ -520,6 +557,15 @@ class VideoVaultApp(ctk.CTk):
         self.details_box.insert("1.0", text)
         self.details_box.configure(state="disabled")
 
+    def _update_statistics(self) -> None:
+        found_videos = len(self.video_entries)
+        duplicate_groups = sum(1 for item in self.video_entries if item.is_duplicate)
+        last_scan = self.last_scan_at if self.last_scan_at else "Nie"
+
+        self.stats_videos_var.set(str(found_videos))
+        self.stats_last_scan_var.set(last_scan)
+        self.stats_duplicates_var.set(str(duplicate_groups))
+
     @staticmethod
     def _get_video_title(entry: VideoEntry) -> str:
         parent_names: list[str] = []
@@ -541,6 +587,7 @@ class VideoVaultApp(ctk.CTk):
         self.store.save(
             directories=self._get_directories(),
             duplicate_by_size=self.duplicate_by_size_var.get(),
+            last_scan_at=self.last_scan_at,
             videos=self.video_entries,
         )
 
