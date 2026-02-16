@@ -15,6 +15,15 @@ VideoVault ist eine Desktop-App auf Basis von Python und `customtkinter`, um Vid
 - Lokale Persistenz in `videovault_data.json`
 - Hintergrund-Scan mit `threading`, damit die GUI reaktionsfaehig bleibt
 
+## Design-Hinweise (Hell/Dunkel)
+
+- Die App-Oberflaeche selbst (Frames, Listen, Scrollbars, Progressbar) wird in `customtkinter` fuer Hell/Dunkel umgeschaltet.
+- Die native Windows-Titelleiste wird auf unterstuetzten Systemen ebenfalls auf Hell/Dunkel gesetzt.
+- Info-, Warn-, Fehler- und Ja/Nein-Dialoge werden als eigene `CTkToplevel`-Dialoge angezeigt und folgen dem gewaehlten Theme.
+- Datei-Auswahlfenster (`tkinter.filedialog`) sind weiterhin systemeigene Dialoge und lassen sich nicht vollstaendig im `customtkinter`-Look stylen.
+- Dadurch kann es je nach Windows-Version und Systemeinstellungen vorkommen, dass einzelne Datei-Dialogfenster optisch heller wirken als die App.
+- Fuer ein komplett einheitliches Dunkel-Design waere ein eigener Dateibrowser innerhalb der App notwendig.
+
 ## Voraussetzungen
 
 - Windows mit PowerShell
