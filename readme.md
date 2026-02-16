@@ -5,8 +5,11 @@ VideoVault ist eine Desktop-App auf Basis von Python und `customtkinter`, um Vid
 ## Funktionen
 
 - Verwaltung mehrerer Quell-Verzeichnisse
+- Anzeige der aktuellen Anzahl hinterlegter Quell-Verzeichnisse
+- Import und Export der Verzeichnisliste (`.json` oder `.txt`), Exportname frei waehlbar
 - Rekursiver Scan auf Video-Dateien (`.mp4`, `.mkv`, `.avi`, `.mov`)
 - Duplikat-Erkennung nach Dateiname oder optional nach uebergeordnetem Verzeichnisnamen, jeweils optional kombiniert mit Dateigroesse
+- Sichtbarer Fortschrittsbalken waehrend des Scan-Vorgangs
 - Detailansicht mit allen gefundenen Pfaden pro Video
 - Klickbare Pfade in der Detailansicht zum direkten Oeffnen im Standard-Videoplayer
 - Lokale Persistenz in `videovault_data.json`
