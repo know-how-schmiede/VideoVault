@@ -6,6 +6,7 @@ Dieses Dokument beschreibt die veroeffentlichten Versionen von VideoVault.
 
 | Version | Datum       | Beschreibung |
 |---------|-------------|--------------|
+| 0.6.1   | 2026-02-17  | Stabilisierung der Cover-Anzeige im Metadaten-Bereich: Image-Lifecycle verbessert, um Tkinter/CustomTkinter-Fehler (`pyimage ... doesn't exist`) beim Wechseln der Auswahl und beim Metadaten-Refresh zu vermeiden. |
 | 0.6.0   | 2026-02-17  | Doku erweitert und neue Funktionen zusammengefuehrt: pro Treffer in `Found paths` kann jetzt der uebergeordnete Ordner direkt im Dateimanager geoeffnet werden (`Open folder`). Metadaten/Cover koennen per TMDB-Download geladen werden, inklusive In-App-Formular zum Setzen des API-Keys (`Set TMDB key`) mit lokaler Speicherung. |
 | 0.5.2   | 2026-02-17  | Im Bereich `Found paths` wurde pro Eintrag eine zusaetzliche Option zum Oeffnen des uebergeordneten Ordners im Dateimanager hinzugefuegt (`Open folder`). Zusaetzlich kann die App Metadaten und Cover direkt aus dem Internet (TMDB) laden und im Filmordner als `movie.nfo` und `poster.jpg` speichern. Der TMDB-API-Key kann nun direkt ueber ein Eingabe-Formular in der App gesetzt und lokal gespeichert werden. |
 | 0.5.1   | 2026-02-17  | GUI-Sprache auf Englisch umgestellt (Labels, Statusmeldungen, Dialoge und Hinweistexte) sowie README auf Englisch aktualisiert. |

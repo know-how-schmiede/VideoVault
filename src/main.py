@@ -245,6 +245,7 @@ class VideoVaultApp(ctk.CTk):
         self.last_scan_at: str | None = None
         self.details_link_targets: dict[str, tuple[str, str]] = {}
         self.cover_image: ctk.CTkImage | None = None
+        self.cover_placeholder_image: ctk.CTkImage | None = None
 
         self.duplicate_by_size_var = ctk.BooleanVar(value=False)
         self.duplicate_by_parent_dir_var = ctk.BooleanVar(value=False)
@@ -487,10 +488,18 @@ class VideoVaultApp(ctk.CTk):
             height=320,
             anchor="center",
             justify="center",
+            compound="center",
             fg_color=("gray90", "gray20"),
             corner_radius=8,
         )
         self.cover_label.grid(row=0, column=0, rowspan=2, padx=(10, 8), pady=10, sticky="n")
+        if Image is not None:
+            placeholder = Image.new("RGB", (2, 2), color=(0, 0, 0))
+            self.cover_placeholder_image = ctk.CTkImage(
+                light_image=placeholder,
+                dark_image=placeholder,
+                size=(2, 2),
+            )
 
         metadata_header = ctk.CTkFrame(metadata_frame, fg_color="transparent")
         metadata_header.grid(row=0, column=1, padx=(0, 10), pady=(10, 6), sticky="ew")
@@ -1715,39 +1724,46 @@ class VideoVaultApp(ctk.CTk):
         return None
 
     def _set_cover_image(self, cover_path: Path | None) -> None:
-        self.cover_image = None
+        new_image: ctk.CTkImage | None = None
+        fallback_text = "No cover found"
 
         if cover_path is None:
-            self.cover_label.configure(image=None, text="No cover found")
+            fallback_text = "No cover found"
+        elif Image is None:
+            fallback_text = (
+                f"Cover found:\n{cover_path.name}\n\n"
+                "Install Pillow to display it."
+            )
+        else:
+            try:
+                with Image.open(cover_path) as source:
+                    prepared = source.convert("RGB")
+
+                resampling_class = getattr(Image, "Resampling", Image)
+                resampling = getattr(
+                    resampling_class,
+                    "LANCZOS",
+                    getattr(Image, "LANCZOS", 1),
+                )
+                prepared.thumbnail((220, 320), resampling)
+                new_image = ctk.CTkImage(
+                    light_image=prepared,
+                    dark_image=prepared,
+                    size=prepared.size,
+                )
+            except Exception:
+                fallback_text = f"Could not load cover:\n{cover_path.name}"
+
+        if new_image is None:
+            if self.cover_placeholder_image is not None:
+                self.cover_image = self.cover_placeholder_image
+                self.cover_label.configure(image=self.cover_image, text=fallback_text)
+            else:
+                self.cover_label.configure(text=fallback_text)
+                self.cover_image = None
             return
 
-        if Image is None:
-            self.cover_label.configure(
-                image=None,
-                text=f"Cover found:\n{cover_path.name}\n\nInstall Pillow to display it.",
-            )
-            return
-
-        try:
-            with Image.open(cover_path) as source:
-                prepared = source.convert("RGB")
-
-            resampling_class = getattr(Image, "Resampling", Image)
-            resampling = getattr(
-                resampling_class,
-                "LANCZOS",
-                getattr(Image, "LANCZOS", 1),
-            )
-            prepared.thumbnail((220, 320), resampling)
-            self.cover_image = ctk.CTkImage(
-                light_image=prepared,
-                dark_image=prepared,
-                size=prepared.size,
-            )
-        except Exception:
-            self.cover_label.configure(image=None, text=f"Could not load cover:\n{cover_path.name}")
-            return
-
+        self.cover_image = new_image
         self.cover_label.configure(image=self.cover_image, text="")
 
     def _set_description_text(self, text: str) -> None:
