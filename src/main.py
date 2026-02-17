@@ -215,6 +215,8 @@ class VideoScanner:
 class VideoVaultApp(ctk.CTk):
     DATA_FILE = "videovault_data.json"
     COVER_EXTENSIONS = (".jpg", ".jpeg", ".png", ".webp")
+    STATUS_ICON_PRESENT = "\u2713"
+    STATUS_ICON_MISSING = "\u2715"
     TMDB_API_BASE_URL = "https://api.themoviedb.org/3"
     TMDB_IMAGE_BASE_URL = "https://image.tmdb.org/t/p/w780"
     TMDB_LANGUAGES = ("de-DE", "en-US")
@@ -239,7 +241,10 @@ class VideoVaultApp(ctk.CTk):
         self.scanner = VideoScanner()
 
         self.video_entries: list[VideoEntry] = []
-        self.row_to_entry: dict[int, VideoEntry] = {}
+        self.row_to_entry: dict[str, VideoEntry] = {}
+        self.video_row_widgets: dict[str, tuple[ctk.CTkFrame, ctk.CTkLabel, ctk.CTkLabel, ctk.CTkLabel]] = {}
+        self.video_row_status: dict[str, tuple[bool, bool]] = {}
+        self.selected_video_row_id: str | None = None
         self.is_scanning = False
         self.is_downloading_metadata = False
         self.last_scan_at: str | None = None
@@ -258,6 +263,12 @@ class VideoVaultApp(ctk.CTk):
         self.appearance_mode_var = ctk.StringVar(value="System")
         self.tmdb_api_key = ""
         self.browse_initial_dir: str | None = None
+        self.video_list_text_color = "#111827"
+        self.video_list_select_bg = "#2563eb"
+        self.video_list_select_fg = "#ffffff"
+        self.video_list_duplicate_color = "#dc2626"
+        self.video_icon_ok_color = "#16a34a"
+        self.video_icon_missing_color = "#dc2626"
 
         self._build_layout()
         self._load_saved_state()
@@ -419,17 +430,42 @@ class VideoVaultApp(ctk.CTk):
         list_container = ctk.CTkFrame(panel)
         list_container.grid(row=1, column=0, padx=12, pady=(0, 12), sticky="nsew")
         list_container.grid_columnconfigure(0, weight=1)
-        list_container.grid_rowconfigure(0, weight=1)
+        list_container.grid_rowconfigure(1, weight=1)
 
-        self.video_listbox = Listbox(list_container, selectmode=SINGLE, exportselection=False)
-        self.video_listbox.grid(row=0, column=0, sticky="nsew")
-        self.video_listbox.bind("<<ListboxSelect>>", self._on_video_selected)
+        self.video_header_frame = ctk.CTkFrame(list_container, corner_radius=6)
+        self.video_header_frame.grid(row=0, column=0, pady=(0, 6), sticky="ew")
+        self.video_header_frame.grid_columnconfigure(0, weight=1)
 
-        self.video_scrollbar = ctk.CTkScrollbar(
-            list_container, orientation="vertical", command=self.video_listbox.yview
+        self.video_header_video_label = ctk.CTkLabel(
+            self.video_header_frame,
+            text="Video",
+            anchor="w",
         )
-        self.video_scrollbar.grid(row=0, column=1, sticky="ns")
-        self.video_listbox.configure(yscrollcommand=self.video_scrollbar.set)
+        self.video_header_video_label.grid(row=0, column=0, padx=(10, 6), pady=6, sticky="ew")
+
+        self.video_header_cover_label = ctk.CTkLabel(
+            self.video_header_frame,
+            text="Cover",
+            width=68,
+            anchor="center",
+        )
+        self.video_header_cover_label.grid(row=0, column=1, padx=(0, 6), pady=6)
+
+        self.video_header_desc_label = ctk.CTkLabel(
+            self.video_header_frame,
+            text="Desc",
+            width=68,
+            anchor="center",
+        )
+        self.video_header_desc_label.grid(row=0, column=2, padx=(0, 10), pady=6)
+
+        self.video_rows_frame = ctk.CTkScrollableFrame(
+            list_container,
+            corner_radius=6,
+        )
+        self.video_rows_frame.grid(row=1, column=0, sticky="nsew")
+        self.video_rows_frame.grid_columnconfigure(0, weight=1)
+        self.video_scrollbar = self.video_rows_frame._scrollbar
 
     def _build_details_panel(self) -> None:
         panel = ctk.CTkFrame(self)
@@ -923,6 +959,41 @@ class VideoVaultApp(ctk.CTk):
             relief="flat",
         )
 
+    def _style_video_tree(
+        self,
+        bg_color: str,
+        text_color: str,
+        border_color: str,
+        select_bg: str,
+        select_fg: str,
+        is_dark: bool,
+    ) -> None:
+        heading_bg = "#111827" if is_dark else "#e5e7eb"
+        heading_fg = "#f9fafb" if is_dark else "#111827"
+        self.video_header_frame.configure(fg_color=heading_bg, border_width=1, border_color=border_color)
+        self.video_header_video_label.configure(text_color=heading_fg)
+        self.video_header_cover_label.configure(text_color=heading_fg)
+        self.video_header_desc_label.configure(text_color=heading_fg)
+
+        self.video_rows_frame.configure(
+            fg_color=bg_color,
+            border_width=1,
+            border_color=border_color,
+        )
+        self.video_scrollbar.configure(
+            fg_color=bg_color,
+            button_color="#4b5563" if is_dark else "#9ca3af",
+            button_hover_color="#6b7280",
+        )
+
+        self.video_list_text_color = text_color
+        self.video_list_select_bg = select_bg
+        self.video_list_select_fg = select_fg
+        self.video_list_duplicate_color = "#f87171" if is_dark else "#dc2626"
+        self.video_icon_ok_color = "#22c55e" if is_dark else "#16a34a"
+        self.video_icon_missing_color = "#f87171" if is_dark else "#dc2626"
+        self._update_video_row_styles()
+
     def _apply_theme_colors(self) -> None:
         is_dark = ctk.get_appearance_mode().lower() == "dark"
         if is_dark:
@@ -959,13 +1030,13 @@ class VideoVaultApp(ctk.CTk):
             select_bg=select_bg,
             select_fg=select_fg,
         )
-        self._style_listbox(
-            self.video_listbox,
+        self._style_video_tree(
             bg_color=list_bg,
             text_color=list_fg,
             border_color=list_border,
             select_bg=select_bg,
             select_fg=select_fg,
+            is_dark=is_dark,
         )
         self.directory_scrollbar.configure(
             fg_color=scrollbar_fg,
@@ -1107,26 +1178,141 @@ class VideoVaultApp(ctk.CTk):
             self._show_warning_dialog("Scan warnings", preview)
 
     def _refresh_video_list(self) -> None:
-        self.video_listbox.delete(0, END)
+        selected_entry = self._get_selected_video_entry()
+        selected_primary_path = (
+            selected_entry.paths[0] if selected_entry is not None and selected_entry.paths else None
+        )
+
+        for child in self.video_rows_frame.winfo_children():
+            child.destroy()
+
         self.row_to_entry.clear()
+        self.video_row_widgets.clear()
+        self.video_row_status.clear()
+        self.selected_video_row_id = None
 
         for row, item in enumerate(self.video_entries):
             label = self._format_video_label(item)
-            self.video_listbox.insert(END, label)
-            if item.is_duplicate:
-                try:
-                    self.video_listbox.itemconfig(row, fg="#dc2626")
-                except Exception:
-                    pass
-            self.row_to_entry[row] = item
+            has_cover, has_description = self._get_metadata_status(item)
+            item_id = f"video_{row}"
+            self._create_video_row(
+                row_id=item_id,
+                row_index=row,
+                label=label,
+                has_cover=has_cover,
+                has_description=has_description,
+                is_duplicate=item.is_duplicate,
+            )
+            self.row_to_entry[item_id] = item
+            if selected_primary_path and item.paths and item.paths[0] == selected_primary_path:
+                self.selected_video_row_id = item_id
 
         if not self.video_entries:
             self._set_details_text("No videos available. Start a scan.")
             self._reset_movie_metadata("No description available.")
-        else:
+        elif self.selected_video_row_id is None:
             self._set_details_text("Select a video to show the found paths.")
             self._reset_movie_metadata()
+        else:
+            selected_current = self.row_to_entry.get(self.selected_video_row_id)
+            if selected_current is not None:
+                self._show_video_details(selected_current)
+
+        self._update_video_row_styles()
         self._update_statistics()
+
+    def _create_video_row(
+        self,
+        row_id: str,
+        row_index: int,
+        label: str,
+        has_cover: bool,
+        has_description: bool,
+        is_duplicate: bool,
+    ) -> None:
+        row_frame = ctk.CTkFrame(
+            self.video_rows_frame,
+            fg_color="transparent",
+            corner_radius=6,
+        )
+        row_frame.grid(row=row_index, column=0, padx=4, pady=(0, 3), sticky="ew")
+        row_frame.grid_columnconfigure(0, weight=1)
+
+        title_label = ctk.CTkLabel(row_frame, text=label, anchor="w")
+        title_label.grid(row=0, column=0, padx=(8, 6), pady=3, sticky="ew")
+
+        cover_icon = self.STATUS_ICON_PRESENT if has_cover else self.STATUS_ICON_MISSING
+        cover_label = ctk.CTkLabel(row_frame, text=cover_icon, width=68, anchor="center")
+        cover_label.grid(row=0, column=1, padx=(0, 6), pady=3)
+
+        description_icon = self.STATUS_ICON_PRESENT if has_description else self.STATUS_ICON_MISSING
+        description_label = ctk.CTkLabel(row_frame, text=description_icon, width=68, anchor="center")
+        description_label.grid(row=0, column=2, padx=(0, 8), pady=3)
+
+        self._bind_video_row_click(row_frame, row_id)
+        self._bind_video_row_click(title_label, row_id)
+        self._bind_video_row_click(cover_label, row_id)
+        self._bind_video_row_click(description_label, row_id)
+
+        self.video_row_widgets[row_id] = (
+            row_frame,
+            title_label,
+            cover_label,
+            description_label,
+        )
+        self.video_row_status[row_id] = (has_cover, has_description)
+        if is_duplicate:
+            title_label.configure(text_color=self.video_list_duplicate_color)
+
+    def _bind_video_row_click(self, widget: object, row_id: str) -> None:
+        if hasattr(widget, "bind"):
+            widget.bind(
+                "<Button-1>",
+                lambda event, selected_row_id=row_id: self._on_video_selected(
+                    _event=event,
+                    row_id=selected_row_id,
+                ),
+                add="+",
+            )
+
+    def _update_video_row_styles(self) -> None:
+        for row_id, widgets in self.video_row_widgets.items():
+            row_frame, title_label, cover_label, description_label = widgets
+            has_cover, has_description = self.video_row_status.get(row_id, (False, False))
+            entry = self.row_to_entry.get(row_id)
+            is_selected = row_id == self.selected_video_row_id
+
+            row_frame.configure(fg_color=self.video_list_select_bg if is_selected else "transparent")
+
+            if is_selected:
+                title_label.configure(text_color=self.video_list_select_fg)
+            else:
+                title_color = (
+                    self.video_list_duplicate_color
+                    if entry is not None and entry.is_duplicate
+                    else self.video_list_text_color
+                )
+                title_label.configure(text_color=title_color)
+
+            cover_label.configure(
+                text=self.STATUS_ICON_PRESENT if has_cover else self.STATUS_ICON_MISSING,
+                text_color=self.video_icon_ok_color if has_cover else self.video_icon_missing_color,
+            )
+            description_label.configure(
+                text=self.STATUS_ICON_PRESENT if has_description else self.STATUS_ICON_MISSING,
+                text_color=self.video_icon_ok_color
+                if has_description
+                else self.video_icon_missing_color,
+            )
+
+    def _get_metadata_status(self, item: VideoEntry) -> tuple[bool, bool]:
+        if not item.paths:
+            return False, False
+
+        primary_video_path = Path(item.paths[0])
+        has_cover = self._find_cover_file(primary_video_path) is not None
+        has_description = self._find_description_file(primary_video_path) is not None
+        return has_cover, has_description
 
     def _format_video_label(self, item: VideoEntry) -> str:
         title = self._get_video_title(item)
@@ -1139,16 +1325,17 @@ class VideoVaultApp(ctk.CTk):
 
         return title
 
-    def _on_video_selected(self, _event: object) -> None:
-        selection = self.video_listbox.curselection()
-        if not selection:
+    def _on_video_selected(self, _event: object | None = None, row_id: str | None = None) -> None:
+        target_row_id = row_id if row_id is not None else self.selected_video_row_id
+        if target_row_id is None:
             return
 
-        index = selection[0]
-        entry = self.row_to_entry.get(index)
+        entry = self.row_to_entry.get(target_row_id)
         if entry is None:
             return
 
+        self.selected_video_row_id = target_row_id
+        self._update_video_row_styles()
         self._show_video_details(entry)
 
     def _show_video_details(self, entry: VideoEntry) -> None:
@@ -1307,15 +1494,7 @@ class VideoVaultApp(ctk.CTk):
 
         cover_message = f" + {cover_path.name}" if cover_saved else ""
         self.status_var.set(f"Metadata saved: {description_path.name}{cover_message}")
-
-        selected_entry = self._get_selected_video_entry()
-        if (
-            selected_entry is not None
-            and selected_entry.paths
-            and entry.paths
-            and selected_entry.paths[0] == entry.paths[0]
-        ):
-            self._show_video_details(selected_entry)
+        self._refresh_video_list()
 
     def _metadata_download_failed(self, error_message: str) -> None:
         self.is_downloading_metadata = False
@@ -1635,12 +1814,10 @@ class VideoVaultApp(ctk.CTk):
         dialog.wait_window()
 
     def _get_selected_video_entry(self) -> VideoEntry | None:
-        selection = self.video_listbox.curselection()
-        if not selection:
+        if self.selected_video_row_id is None:
             return None
 
-        selected_index = selection[0]
-        return self.row_to_entry.get(selected_index)
+        return self.row_to_entry.get(self.selected_video_row_id)
 
     def _find_description_file(self, video_path: Path) -> Path | None:
         directory = video_path.parent
@@ -1655,8 +1832,11 @@ class VideoVaultApp(ctk.CTk):
             directory / "details.txt",
         ]
         for candidate in candidates:
-            if candidate.is_file():
-                return candidate
+            try:
+                if candidate.is_file():
+                    return candidate
+            except OSError:
+                continue
         return None
 
     def _find_cover_file(self, video_path: Path) -> Path | None:
@@ -1673,8 +1853,11 @@ class VideoVaultApp(ctk.CTk):
                 directory / f"movie{extension}",
             )
             for candidate in candidates:
-                if candidate.is_file():
-                    return candidate
+                try:
+                    if candidate.is_file():
+                        return candidate
+                except OSError:
+                    continue
         return None
 
     def _load_description_text(self, file_path: Path) -> str | None:
