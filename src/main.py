@@ -6,12 +6,18 @@ import os
 import subprocess
 import sys
 import threading
+import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from tkinter import END, Listbox, SINGLE, filedialog
 
 import customtkinter as ctk
+
+try:
+    from PIL import Image
+except ImportError:  # pragma: no cover
+    Image = None  # type: ignore[assignment]
 
 from version import WINDOW_TITLE
 
@@ -192,6 +198,7 @@ class VideoScanner:
 
 class VideoVaultApp(ctk.CTk):
     DATA_FILE = "videovault_data.json"
+    COVER_EXTENSIONS = (".jpg", ".jpeg", ".png", ".webp")
     APPEARANCE_LABEL_TO_MODE = {
         "System": "System",
         "Light": "Light",
@@ -209,7 +216,7 @@ class VideoVaultApp(ctk.CTk):
         self.geometry("1200x760")
         self.minsize(980, 620)
 
-        self.store = JsonStore(Path(__file__).resolve().parent / self.DATA_FILE)
+        self.store = JsonStore(self._get_data_root() / self.DATA_FILE)
         self.scanner = VideoScanner()
 
         self.video_entries: list[VideoEntry] = []
@@ -217,6 +224,7 @@ class VideoVaultApp(ctk.CTk):
         self.is_scanning = False
         self.last_scan_at: str | None = None
         self.details_link_tags: dict[str, str] = {}
+        self.cover_image: ctk.CTkImage | None = None
 
         self.duplicate_by_size_var = ctk.BooleanVar(value=False)
         self.duplicate_by_parent_dir_var = ctk.BooleanVar(value=False)
@@ -232,6 +240,16 @@ class VideoVaultApp(ctk.CTk):
         self._build_layout()
         self._load_saved_state()
         self.protocol("WM_DELETE_WINDOW", self._on_close)
+
+    @staticmethod
+    def _get_data_root() -> Path:
+        if getattr(sys, "frozen", False):
+            return Path(sys.executable).resolve().parent
+
+        script_dir = Path(__file__).resolve().parent
+        if script_dir.name.lower() == "src":
+            return script_dir.parent
+        return script_dir
 
     def _build_layout(self) -> None:
         self.grid_columnconfigure(0, weight=0)
@@ -395,8 +413,8 @@ class VideoVaultApp(ctk.CTk):
         panel = ctk.CTkFrame(self)
         panel.grid(row=1, column=2, padx=(0, 12), pady=(0, 12), sticky="nsew")
         panel.grid_columnconfigure(0, weight=1)
-        panel.grid_rowconfigure(1, weight=1)
-        panel.grid_rowconfigure(3, weight=0)
+        panel.grid_rowconfigure(1, weight=2)
+        panel.grid_rowconfigure(5, weight=1)
 
         ctk.CTkLabel(panel, text="Details").grid(row=0, column=0, padx=12, pady=(12, 8), sticky="w")
 
@@ -432,6 +450,34 @@ class VideoVaultApp(ctk.CTk):
         ctk.CTkLabel(stats_frame, textvariable=self.stats_duplicates_var).grid(
             row=2, column=1, padx=10, pady=(4, 10), sticky="e"
         )
+
+        ctk.CTkLabel(panel, text="Movie metadata").grid(row=4, column=0, padx=12, pady=(0, 6), sticky="w")
+
+        metadata_frame = ctk.CTkFrame(panel)
+        metadata_frame.grid(row=5, column=0, padx=12, pady=(0, 12), sticky="nsew")
+        metadata_frame.grid_columnconfigure(0, weight=0)
+        metadata_frame.grid_columnconfigure(1, weight=1)
+        metadata_frame.grid_rowconfigure(1, weight=1)
+
+        self.cover_label = ctk.CTkLabel(
+            metadata_frame,
+            text="No cover found",
+            width=220,
+            height=320,
+            anchor="center",
+            justify="center",
+            fg_color=("gray90", "gray20"),
+            corner_radius=8,
+        )
+        self.cover_label.grid(row=0, column=0, rowspan=2, padx=(10, 8), pady=10, sticky="n")
+
+        ctk.CTkLabel(metadata_frame, text="Description").grid(
+            row=0, column=1, padx=(0, 10), pady=(10, 6), sticky="w"
+        )
+        self.description_box = ctk.CTkTextbox(metadata_frame, wrap="word")
+        self.description_box.grid(row=1, column=1, padx=(0, 10), pady=(0, 10), sticky="nsew")
+        self.description_box.bind("<Key>", lambda _event: "break")
+        self._reset_movie_metadata()
 
     def _load_saved_state(self) -> None:
         (
@@ -1016,8 +1062,10 @@ class VideoVaultApp(ctk.CTk):
 
         if not self.video_entries:
             self._set_details_text("No videos available. Start a scan.")
+            self._reset_movie_metadata("No description available.")
         else:
             self._set_details_text("Select a video to show the found paths.")
+            self._reset_movie_metadata()
         self._update_statistics()
 
     def _format_video_label(self, item: VideoEntry) -> str:
@@ -1071,6 +1119,160 @@ class VideoVaultApp(ctk.CTk):
             self.details_box.tag_add(tag_name, start, end)
             self.details_box.tag_config(tag_name, foreground="#2563eb", underline=1)
             self.details_box.insert(END, f"{size_text}\n")
+
+        self._update_movie_metadata(entry)
+
+    def _reset_movie_metadata(
+        self,
+        description_text: str = "Select a video to load description and cover.",
+    ) -> None:
+        self._set_description_text(description_text)
+        self._set_cover_image(None)
+
+    def _update_movie_metadata(self, entry: VideoEntry) -> None:
+        if not entry.paths:
+            self._reset_movie_metadata("No description available.")
+            return
+
+        primary_video_path = Path(entry.paths[0])
+        description_path = self._find_description_file(primary_video_path)
+        description_text = (
+            self._load_description_text(description_path) if description_path is not None else None
+        )
+        if description_text:
+            self._set_description_text(description_text)
+        else:
+            self._set_description_text(
+                "No local description found.\n\nSupported files:\n"
+                "- <video>.nfo / movie.nfo / info.nfo\n"
+                "- <video>.txt / description.txt / plot.txt / details.txt"
+            )
+
+        cover_path = self._find_cover_file(primary_video_path)
+        self._set_cover_image(cover_path)
+
+    def _find_description_file(self, video_path: Path) -> Path | None:
+        directory = video_path.parent
+        stem = video_path.stem
+        candidates = [
+            directory / f"{stem}.nfo",
+            directory / f"{stem}.txt",
+            directory / "movie.nfo",
+            directory / "info.nfo",
+            directory / "description.txt",
+            directory / "plot.txt",
+            directory / "details.txt",
+        ]
+        for candidate in candidates:
+            if candidate.is_file():
+                return candidate
+        return None
+
+    def _find_cover_file(self, video_path: Path) -> Path | None:
+        directory = video_path.parent
+        stem = video_path.stem
+        for extension in self.COVER_EXTENSIONS:
+            candidates = (
+                directory / f"{stem}-poster{extension}",
+                directory / f"{stem}{extension}",
+                directory / f"{directory.name}{extension}",
+                directory / f"poster{extension}",
+                directory / f"folder{extension}",
+                directory / f"cover{extension}",
+                directory / f"movie{extension}",
+            )
+            for candidate in candidates:
+                if candidate.is_file():
+                    return candidate
+        return None
+
+    def _load_description_text(self, file_path: Path) -> str | None:
+        raw_text = self._read_text_file(file_path)
+        if raw_text is None:
+            return None
+
+        text = raw_text.strip()
+        if not text:
+            return None
+
+        if file_path.suffix.lower() == ".nfo":
+            extracted_text = self._extract_description_from_nfo(text)
+            if extracted_text:
+                text = extracted_text
+
+        if len(text) > 3500:
+            text = f"{text[:3500].rstrip()}..."
+        return text
+
+    @staticmethod
+    def _read_text_file(file_path: Path) -> str | None:
+        for encoding in ("utf-8-sig", "utf-8", "cp1252", "latin-1"):
+            try:
+                return file_path.read_text(encoding=encoding)
+            except UnicodeDecodeError:
+                continue
+            except OSError:
+                return None
+        return None
+
+    @staticmethod
+    def _extract_description_from_nfo(nfo_text: str) -> str | None:
+        try:
+            root = ET.fromstring(nfo_text)
+        except ET.ParseError:
+            return None
+
+        for tag_name in ("plot", "outline", "description", "overview", "summary"):
+            node = root.find(f".//{tag_name}")
+            if node is None:
+                continue
+
+            node_text = " ".join("".join(node.itertext()).split())
+            if node_text:
+                return node_text
+        return None
+
+    def _set_cover_image(self, cover_path: Path | None) -> None:
+        self.cover_image = None
+
+        if cover_path is None:
+            self.cover_label.configure(image=None, text="No cover found")
+            return
+
+        if Image is None:
+            self.cover_label.configure(
+                image=None,
+                text=f"Cover found:\n{cover_path.name}\n\nInstall Pillow to display it.",
+            )
+            return
+
+        try:
+            with Image.open(cover_path) as source:
+                prepared = source.convert("RGB")
+
+            resampling_class = getattr(Image, "Resampling", Image)
+            resampling = getattr(
+                resampling_class,
+                "LANCZOS",
+                getattr(Image, "LANCZOS", 1),
+            )
+            prepared.thumbnail((220, 320), resampling)
+            self.cover_image = ctk.CTkImage(
+                light_image=prepared,
+                dark_image=prepared,
+                size=prepared.size,
+            )
+        except Exception:
+            self.cover_label.configure(image=None, text=f"Could not load cover:\n{cover_path.name}")
+            return
+
+        self.cover_label.configure(image=self.cover_image, text="")
+
+    def _set_description_text(self, text: str) -> None:
+        self.description_box.configure(state="normal")
+        self.description_box.delete("1.0", END)
+        self.description_box.insert("1.0", text)
+        self.description_box.configure(state="disabled")
 
     def _set_details_text(self, text: str) -> None:
         self._clear_details_box()
@@ -1196,5 +1398,5 @@ def main() -> None:
 
 if __name__ == "__main__":
     # EXE build (PyInstaller):
-    # pyinstaller --onefile --windowed --name VideoVault main.py
+    # pyinstaller --onefile --windowed --name VideoVault src/main.py
     main()

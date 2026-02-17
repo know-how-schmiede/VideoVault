@@ -17,4 +17,4 @@ Dieses Dokument beschreibt die veroeffentlichten Versionen von VideoVault.
 ## Versionierung
 
 - Format: `MAJOR.MINOR.PATCH`
-- Die aktive Versionsnummer ist zentral in `version.py` als `APP_VERSION` gepflegt.
+- Die aktive Versionsnummer ist zentral in `src/version.py` als `APP_VERSION` gepflegt.
