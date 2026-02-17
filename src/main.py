@@ -223,7 +223,7 @@ class VideoVaultApp(ctk.CTk):
         self.row_to_entry: dict[int, VideoEntry] = {}
         self.is_scanning = False
         self.last_scan_at: str | None = None
-        self.details_link_tags: dict[str, str] = {}
+        self.details_link_targets: dict[str, tuple[str, str]] = {}
         self.cover_image: ctk.CTkImage | None = None
 
         self.duplicate_by_size_var = ctk.BooleanVar(value=False)
@@ -1115,10 +1115,23 @@ class VideoVaultApp(ctk.CTk):
             end = self.details_box.index("end-1c")
 
             tag_name = f"path_link_{idx}"
-            self.details_link_tags[tag_name] = path
+            self.details_link_targets[tag_name] = ("video", path)
             self.details_box.tag_add(tag_name, start, end)
             self.details_box.tag_config(tag_name, foreground="#2563eb", underline=1)
-            self.details_box.insert(END, f"{size_text}\n")
+            if size_text:
+                self.details_box.insert(END, size_text)
+            self.details_box.insert(END, "  ")
+
+            folder_link_label = "[Open folder]"
+            folder_start = self.details_box.index("end-1c")
+            self.details_box.insert(END, folder_link_label)
+            folder_end = self.details_box.index("end-1c")
+
+            folder_tag = f"folder_link_{idx}"
+            self.details_link_targets[folder_tag] = ("folder", path)
+            self.details_box.tag_add(folder_tag, folder_start, folder_end)
+            self.details_box.tag_config(folder_tag, foreground="#059669", underline=1)
+            self.details_box.insert(END, "\n")
 
         self._update_movie_metadata(entry)
 
@@ -1280,9 +1293,9 @@ class VideoVaultApp(ctk.CTk):
 
     def _clear_details_box(self) -> None:
         self.details_box.configure(cursor="xterm")
-        for tag_name in self.details_link_tags:
+        for tag_name in self.details_link_targets:
             self.details_box.tag_delete(tag_name)
-        self.details_link_tags.clear()
+        self.details_link_targets.clear()
         self.details_box.delete("1.0", END)
 
     def _on_details_click(self, event: object) -> str | None:
@@ -1290,11 +1303,15 @@ class VideoVaultApp(ctk.CTk):
             return None
 
         index = self.details_box.index(f"@{event.x},{event.y}")
-        path = self._get_path_by_text_index(index)
-        if path is None:
+        action = self._get_details_action_by_text_index(index)
+        if action is None:
             return None
 
-        self._open_video_path(path)
+        action_name, target_path = action
+        if action_name == "folder":
+            self._open_parent_folder(target_path)
+        else:
+            self._open_video_path(target_path)
         return "break"
 
     def _on_details_hover(self, event: object) -> None:
@@ -1302,7 +1319,7 @@ class VideoVaultApp(ctk.CTk):
             return
 
         index = self.details_box.index(f"@{event.x},{event.y}")
-        if self._get_path_by_text_index(index):
+        if self._get_details_action_by_text_index(index):
             self.details_box.configure(cursor="hand2")
         else:
             self.details_box.configure(cursor="xterm")
@@ -1310,11 +1327,11 @@ class VideoVaultApp(ctk.CTk):
     def _on_details_leave(self, _event: object) -> None:
         self.details_box.configure(cursor="xterm")
 
-    def _get_path_by_text_index(self, index: str) -> str | None:
+    def _get_details_action_by_text_index(self, index: str) -> tuple[str, str] | None:
         for tag_name in self.details_box.tag_names(index):
-            selected_path = self.details_link_tags.get(tag_name)
-            if selected_path:
-                return selected_path
+            selected_target = self.details_link_targets.get(tag_name)
+            if selected_target:
+                return selected_target
         return None
 
     def _open_video_path(self, path: str) -> None:
@@ -1334,6 +1351,26 @@ class VideoVaultApp(ctk.CTk):
             self._show_error_dialog(
                 "Open failed",
                 f"The file could not be opened:\n{normalized_path}\n\n{exc}",
+            )
+
+    def _open_parent_folder(self, path: str) -> None:
+        normalized_path = os.path.abspath(path)
+        parent_folder = str(Path(normalized_path).parent)
+        if not os.path.isdir(parent_folder):
+            self._show_error_dialog("Folder not found", f"Parent folder not found:\n{parent_folder}")
+            return
+
+        try:
+            if os.name == "nt":
+                os.startfile(parent_folder)  # type: ignore[attr-defined]
+            elif sys.platform == "darwin":
+                subprocess.Popen(["open", parent_folder])
+            else:
+                subprocess.Popen(["xdg-open", parent_folder])
+        except OSError as exc:
+            self._show_error_dialog(
+                "Open folder failed",
+                f"The folder could not be opened:\n{parent_folder}\n\n{exc}",
             )
 
     def _update_statistics(self) -> None:
