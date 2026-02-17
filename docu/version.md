@@ -6,6 +6,7 @@ Dieses Dokument beschreibt die veroeffentlichten Versionen von VideoVault.
 
 | Version | Datum       | Beschreibung |
 |---------|-------------|--------------|
+| 0.6.4   | 2026-02-17  | Neuer Button zum Herunterladen fehlender Metadaten fuer alle Filme (`Download missing for all`) und neue Fehler-Logliste am unteren Fensterrand fuer fehlgeschlagene Downloads. |
 | 0.6.3   | 2026-02-17  | Darstellung der Statusspalten in `Found videos` auf farbige Zustandsanzeige umgestellt (gruen = vorhanden, rot = nicht vorhanden). |
 | 0.6.2   | 2026-02-17  | Liste `Found videos` um zwei Statusspalten erweitert: `Cover` und `Desc`. Der Zustand wird pro Film ueber kleine Icons visualisiert (vorhanden/nicht vorhanden). |
 | 0.6.1   | 2026-02-17  | Stabilisierung der Cover-Anzeige im Metadaten-Bereich: Image-Lifecycle verbessert, um Tkinter/CustomTkinter-Fehler (`pyimage ... doesn't exist`) beim Wechseln der Auswahl und beim Metadaten-Refresh zu vermeiden. |

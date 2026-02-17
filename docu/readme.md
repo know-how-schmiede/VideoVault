@@ -4,7 +4,7 @@ VideoVault is a desktop app built with Python and `customtkinter` to manage vide
 
 ## Current Version
 
-- `0.6.3`
+- `0.6.4`
 
 ## Features
 

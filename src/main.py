@@ -289,6 +289,7 @@ class VideoVaultApp(ctk.CTk):
         self.grid_columnconfigure(1, weight=2)
         self.grid_columnconfigure(2, weight=2)
         self.grid_rowconfigure(1, weight=1)
+        self.grid_rowconfigure(2, weight=0)
 
         top_bar = ctk.CTkFrame(self)
         top_bar.grid(row=0, column=0, columnspan=3, padx=12, pady=(12, 8), sticky="ew")
@@ -350,6 +351,30 @@ class VideoVaultApp(ctk.CTk):
         self._build_sources_panel()
         self._build_video_panel()
         self._build_details_panel()
+        self._build_log_panel()
+
+    def _build_log_panel(self) -> None:
+        panel = ctk.CTkFrame(self)
+        panel.grid(row=2, column=0, columnspan=3, padx=12, pady=(0, 12), sticky="ew")
+        panel.grid_columnconfigure(0, weight=1)
+        panel.grid_rowconfigure(1, weight=1)
+
+        header = ctk.CTkFrame(panel, fg_color="transparent")
+        header.grid(row=0, column=0, padx=10, pady=(8, 4), sticky="ew")
+        header.grid_columnconfigure(0, weight=1)
+
+        ctk.CTkLabel(header, text="Download error log").grid(row=0, column=0, sticky="w")
+        self.clear_log_button = ctk.CTkButton(
+            header,
+            text="Clear log",
+            width=110,
+            command=self._clear_metadata_log,
+        )
+        self.clear_log_button.grid(row=0, column=1, sticky="e")
+
+        self.metadata_log_box = ctk.CTkTextbox(panel, height=120, wrap="word")
+        self.metadata_log_box.grid(row=1, column=0, padx=10, pady=(0, 10), sticky="ew")
+        self.metadata_log_box.configure(state="disabled")
 
     def _build_sources_panel(self) -> None:
         panel = ctk.CTkFrame(self)
@@ -556,6 +581,13 @@ class VideoVaultApp(ctk.CTk):
             command=self._open_tmdb_key_dialog,
         )
         self.tmdb_key_button.grid(row=0, column=2, sticky="e")
+        self.download_missing_metadata_button = ctk.CTkButton(
+            metadata_header,
+            text="Download missing for all",
+            width=220,
+            command=self._download_missing_metadata_for_all,
+        )
+        self.download_missing_metadata_button.grid(row=1, column=1, columnspan=2, pady=(6, 0), sticky="e")
 
         self.description_box = ctk.CTkTextbox(metadata_frame, wrap="word")
         self.description_box.grid(row=1, column=1, padx=(0, 10), pady=(0, 10), sticky="nsew")
@@ -717,6 +749,25 @@ class VideoVaultApp(ctk.CTk):
             cancel_value="No",
         )
         return response == "Yes"
+
+    def _append_metadata_log(self, message: str) -> None:
+        if not hasattr(self, "metadata_log_box"):
+            return
+
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        line = f"[{timestamp}] {message}\n"
+        self.metadata_log_box.configure(state="normal")
+        self.metadata_log_box.insert(END, line)
+        self.metadata_log_box.see(END)
+        self.metadata_log_box.configure(state="disabled")
+
+    def _clear_metadata_log(self) -> None:
+        if not hasattr(self, "metadata_log_box"):
+            return
+
+        self.metadata_log_box.configure(state="normal")
+        self.metadata_log_box.delete("1.0", END)
+        self.metadata_log_box.configure(state="disabled")
 
     def _add_directory_from_entry(self) -> None:
         raw_path = self.directory_entry.get().strip()
@@ -1089,8 +1140,14 @@ class VideoVaultApp(ctk.CTk):
         self.duplicate_checkbox.configure(state=state)
         self.duplicate_parent_checkbox.configure(state=state)
         self.directory_entry.configure(state=state)
+        self._set_metadata_controls_state(enabled)
+
+    def _set_metadata_controls_state(self, enabled: bool) -> None:
+        state = "normal" if enabled else "disabled"
         if hasattr(self, "download_metadata_button"):
             self.download_metadata_button.configure(state=state)
+        if hasattr(self, "download_missing_metadata_button"):
+            self.download_missing_metadata_button.configure(state=state)
         if hasattr(self, "tmdb_key_button"):
             self.tmdb_key_button.configure(state=state)
 
@@ -1447,7 +1504,7 @@ class VideoVaultApp(ctk.CTk):
                 return
 
         self.is_downloading_metadata = True
-        self.download_metadata_button.configure(state="disabled")
+        self._set_metadata_controls_state(False)
         self.status_var.set("Downloading metadata ...")
         worker = threading.Thread(
             target=self._download_metadata_worker,
@@ -1468,7 +1525,13 @@ class VideoVaultApp(ctk.CTk):
             cover_saved = self._download_cover_image(metadata, cover_path)
         except Exception as exc:  # pragma: no cover
             error_message = str(exc)
-            self.after(0, lambda msg=error_message: self._metadata_download_failed(msg))
+            self.after(
+                0,
+                lambda msg=error_message, failed_entry=entry: self._metadata_download_failed(
+                    msg,
+                    failed_entry,
+                ),
+            )
             return
 
         self.after(
@@ -1490,18 +1553,138 @@ class VideoVaultApp(ctk.CTk):
     ) -> None:
         self.is_downloading_metadata = False
         if not self.is_scanning:
-            self.download_metadata_button.configure(state="normal")
+            self._set_metadata_controls_state(True)
 
         cover_message = f" + {cover_path.name}" if cover_saved else ""
         self.status_var.set(f"Metadata saved: {description_path.name}{cover_message}")
         self._refresh_video_list()
 
-    def _metadata_download_failed(self, error_message: str) -> None:
+    def _metadata_download_failed(
+        self,
+        error_message: str,
+        entry: VideoEntry | None = None,
+    ) -> None:
         self.is_downloading_metadata = False
         if not self.is_scanning:
-            self.download_metadata_button.configure(state="normal")
+            self._set_metadata_controls_state(True)
         self.status_var.set("Metadata download failed")
+        movie_label = self._get_video_title(entry) if entry is not None else "Selected movie"
+        self._append_metadata_log(f"ERROR | {movie_label}: {error_message}")
         self._show_error_dialog("Metadata download failed", error_message)
+
+    def _download_missing_metadata_for_all(self) -> None:
+        if self.is_scanning or self.is_downloading_metadata:
+            return
+
+        if not self._get_active_tmdb_api_key():
+            if self._ask_yes_no_dialog(
+                "TMDB key required",
+                "No TMDB API key is configured.\n\n"
+                "Open the key form now?",
+            ):
+                self._open_tmdb_key_dialog()
+            return
+
+        pending_entries = self._collect_entries_with_missing_metadata()
+        if not pending_entries:
+            self._show_info_dialog("Metadata", "All videos already have cover and description.")
+            return
+
+        if not self._ask_yes_no_dialog(
+            "Download missing metadata",
+            f"Download missing cover/description for {len(pending_entries)} videos?",
+        ):
+            return
+
+        self.is_downloading_metadata = True
+        self._set_metadata_controls_state(False)
+        self.status_var.set(f"Downloading metadata for {len(pending_entries)} videos ...")
+
+        worker = threading.Thread(
+            target=self._download_missing_metadata_worker,
+            args=(pending_entries,),
+            daemon=True,
+        )
+        worker.start()
+
+    def _collect_entries_with_missing_metadata(self) -> list[VideoEntry]:
+        pending_entries: list[VideoEntry] = []
+        for entry in self.video_entries:
+            if not entry.paths:
+                continue
+
+            has_cover, has_description = self._get_metadata_status(entry)
+            if has_cover and has_description:
+                continue
+            pending_entries.append(entry)
+
+        return pending_entries
+
+    def _download_missing_metadata_worker(self, entries: list[VideoEntry]) -> None:
+        total = len(entries)
+        processed = 0
+        errors = 0
+        skipped = 0
+
+        for index, entry in enumerate(entries, start=1):
+            movie_label = self._get_video_title(entry)
+            self.after(
+                0,
+                lambda current=index, all_items=total, title=movie_label: self.status_var.set(
+                    f"Downloading metadata ({current}/{all_items}): {title} ..."
+                ),
+            )
+
+            try:
+                if not entry.paths:
+                    skipped += 1
+                    continue
+
+                has_cover, has_description = self._get_metadata_status(entry)
+                if has_cover and has_description:
+                    skipped += 1
+                    continue
+
+                description_path, cover_path = self._get_metadata_sidecar_paths(entry)
+                metadata = self._fetch_metadata_from_tmdb(entry)
+
+                if not has_description:
+                    self._write_nfo_file(description_path, metadata)
+
+                if not has_cover and not self._download_cover_image(metadata, cover_path):
+                    raise RuntimeError("Cover image could not be downloaded.")
+
+                processed += 1
+            except Exception as exc:  # pragma: no cover
+                errors += 1
+                error_text = str(exc).strip() or exc.__class__.__name__
+                self.after(
+                    0,
+                    lambda title=movie_label, detail=error_text: self._append_metadata_log(
+                        f"ERROR | {title}: {detail}"
+                    ),
+                )
+
+        self.after(
+            0,
+            lambda: self._finish_bulk_metadata_download(total, processed, skipped, errors),
+        )
+
+    def _finish_bulk_metadata_download(
+        self,
+        total: int,
+        processed: int,
+        skipped: int,
+        errors: int,
+    ) -> None:
+        self.is_downloading_metadata = False
+        if not self.is_scanning:
+            self._set_metadata_controls_state(True)
+
+        self._refresh_video_list()
+        self.status_var.set(
+            f"Metadata download finished: {processed}/{total} processed, {errors} errors, {skipped} skipped"
+        )
 
     def _fetch_metadata_from_tmdb(self, entry: VideoEntry) -> dict[str, str]:
         api_key = self._get_active_tmdb_api_key()
