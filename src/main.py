@@ -3,6 +3,7 @@ from __future__ import annotations
 import ctypes
 import json
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -11,6 +12,9 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from tkinter import END, Listbox, SINGLE, filedialog
+from urllib.error import HTTPError, URLError
+from urllib.parse import urlencode
+from urllib.request import Request, urlopen
 
 import customtkinter as ctk
 
@@ -64,15 +68,15 @@ class JsonStore:
     def __init__(self, file_path: Path) -> None:
         self.file_path = file_path
 
-    def load(self) -> tuple[list[str], bool, bool, str | None, list[VideoEntry], str]:
+    def load(self) -> tuple[list[str], bool, bool, str | None, list[VideoEntry], str, str]:
         if not self.file_path.exists():
-            return [], False, False, None, [], "System"
+            return [], False, False, None, [], "System", ""
 
         try:
             with self.file_path.open("r", encoding="utf-8") as handle:
                 payload = json.load(handle)
         except (OSError, json.JSONDecodeError):
-            return [], False, False, None, [], "System"
+            return [], False, False, None, [], "System", ""
 
         raw_dirs = payload.get("directories", [])
         duplicate_by_size = bool(payload.get("duplicate_by_size", False))
@@ -80,8 +84,10 @@ class JsonStore:
         raw_last_scan_at = payload.get("last_scan_at")
         raw_videos = payload.get("videos", [])
         raw_appearance_mode = payload.get("appearance_mode", "System")
+        raw_tmdb_api_key = payload.get("tmdb_api_key", "")
         last_scan_at = raw_last_scan_at if isinstance(raw_last_scan_at, str) else None
         appearance_mode = raw_appearance_mode if isinstance(raw_appearance_mode, str) else "System"
+        tmdb_api_key = raw_tmdb_api_key if isinstance(raw_tmdb_api_key, str) else ""
 
         directories = [item for item in raw_dirs if isinstance(item, str)]
         videos: list[VideoEntry] = []
@@ -92,7 +98,15 @@ class JsonStore:
                     if entry is not None:
                         videos.append(entry)
 
-        return directories, duplicate_by_size, duplicate_by_parent_dir, last_scan_at, videos, appearance_mode
+        return (
+            directories,
+            duplicate_by_size,
+            duplicate_by_parent_dir,
+            last_scan_at,
+            videos,
+            appearance_mode,
+            tmdb_api_key,
+        )
 
     def save(
         self,
@@ -102,6 +116,7 @@ class JsonStore:
         last_scan_at: str | None,
         videos: list[VideoEntry],
         appearance_mode: str,
+        tmdb_api_key: str,
     ) -> None:
         payload = {
             "directories": directories,
@@ -110,6 +125,7 @@ class JsonStore:
             "last_scan_at": last_scan_at,
             "videos": [video.to_dict() for video in videos],
             "appearance_mode": appearance_mode,
+            "tmdb_api_key": tmdb_api_key,
         }
         try:
             self.file_path.parent.mkdir(parents=True, exist_ok=True)
@@ -199,6 +215,9 @@ class VideoScanner:
 class VideoVaultApp(ctk.CTk):
     DATA_FILE = "videovault_data.json"
     COVER_EXTENSIONS = (".jpg", ".jpeg", ".png", ".webp")
+    TMDB_API_BASE_URL = "https://api.themoviedb.org/3"
+    TMDB_IMAGE_BASE_URL = "https://image.tmdb.org/t/p/w780"
+    TMDB_LANGUAGES = ("de-DE", "en-US")
     APPEARANCE_LABEL_TO_MODE = {
         "System": "System",
         "Light": "Light",
@@ -222,6 +241,7 @@ class VideoVaultApp(ctk.CTk):
         self.video_entries: list[VideoEntry] = []
         self.row_to_entry: dict[int, VideoEntry] = {}
         self.is_scanning = False
+        self.is_downloading_metadata = False
         self.last_scan_at: str | None = None
         self.details_link_targets: dict[str, tuple[str, str]] = {}
         self.cover_image: ctk.CTkImage | None = None
@@ -235,6 +255,7 @@ class VideoVaultApp(ctk.CTk):
         self.directory_count_var = ctk.StringVar(value="Count: 0")
         self.appearance_mode = "System"
         self.appearance_mode_var = ctk.StringVar(value="System")
+        self.tmdb_api_key = ""
         self.browse_initial_dir: str | None = None
 
         self._build_layout()
@@ -471,9 +492,26 @@ class VideoVaultApp(ctk.CTk):
         )
         self.cover_label.grid(row=0, column=0, rowspan=2, padx=(10, 8), pady=10, sticky="n")
 
-        ctk.CTkLabel(metadata_frame, text="Description").grid(
-            row=0, column=1, padx=(0, 10), pady=(10, 6), sticky="w"
+        metadata_header = ctk.CTkFrame(metadata_frame, fg_color="transparent")
+        metadata_header.grid(row=0, column=1, padx=(0, 10), pady=(10, 6), sticky="ew")
+        metadata_header.grid_columnconfigure(0, weight=1)
+
+        ctk.CTkLabel(metadata_header, text="Description").grid(row=0, column=0, sticky="w")
+        self.download_metadata_button = ctk.CTkButton(
+            metadata_header,
+            text="Download from internet",
+            width=180,
+            command=self._download_selected_metadata,
         )
+        self.download_metadata_button.grid(row=0, column=1, padx=(0, 6), sticky="e")
+        self.tmdb_key_button = ctk.CTkButton(
+            metadata_header,
+            text="Set TMDB key",
+            width=130,
+            command=self._open_tmdb_key_dialog,
+        )
+        self.tmdb_key_button.grid(row=0, column=2, sticky="e")
+
         self.description_box = ctk.CTkTextbox(metadata_frame, wrap="word")
         self.description_box.grid(row=1, column=1, padx=(0, 10), pady=(0, 10), sticky="nsew")
         self.description_box.bind("<Key>", lambda _event: "break")
@@ -487,10 +525,12 @@ class VideoVaultApp(ctk.CTk):
             last_scan_at,
             videos,
             appearance_mode,
+            tmdb_api_key,
         ) = self.store.load()
         self.duplicate_by_size_var.set(duplicate_by_size)
         self.duplicate_by_parent_dir_var.set(duplicate_by_parent_dir)
         self.last_scan_at = last_scan_at
+        self.tmdb_api_key = tmdb_api_key.strip()
         self._set_appearance_mode(appearance_mode, save=False)
 
         for directory in directories:
@@ -969,6 +1009,10 @@ class VideoVaultApp(ctk.CTk):
         self.duplicate_checkbox.configure(state=state)
         self.duplicate_parent_checkbox.configure(state=state)
         self.directory_entry.configure(state=state)
+        if hasattr(self, "download_metadata_button"):
+            self.download_metadata_button.configure(state=state)
+        if hasattr(self, "tmdb_key_button"):
+            self.tmdb_key_button.configure(state=state)
 
     def _show_scan_progress(self) -> None:
         self.scan_progress.grid()
@@ -980,6 +1024,12 @@ class VideoVaultApp(ctk.CTk):
 
     def start_scan(self) -> None:
         if self.is_scanning:
+            return
+        if self.is_downloading_metadata:
+            self._show_warning_dialog(
+                "Notice",
+                "Please wait until metadata download has finished.",
+            )
             return
 
         directories = self._get_directories()
@@ -1012,7 +1062,8 @@ class VideoVaultApp(ctk.CTk):
                 directories, duplicate_by_size, duplicate_by_parent_dir
             )
         except Exception as exc:  # pragma: no cover
-            self.after(0, lambda: self._scan_failed(str(exc)))
+            error_message = str(exc)
+            self.after(0, lambda msg=error_message: self._scan_failed(msg))
             return
 
         self.after(0, lambda: self._scan_finished(videos, warnings))
@@ -1156,13 +1207,431 @@ class VideoVaultApp(ctk.CTk):
             self._set_description_text(description_text)
         else:
             self._set_description_text(
-                "No local description found.\n\nSupported files:\n"
+                "No local description found.\nUse 'Download from internet' to fetch metadata.\n\nSupported files:\n"
                 "- <video>.nfo / movie.nfo / info.nfo\n"
                 "- <video>.txt / description.txt / plot.txt / details.txt"
             )
 
         cover_path = self._find_cover_file(primary_video_path)
         self._set_cover_image(cover_path)
+
+    def _download_selected_metadata(self) -> None:
+        if self.is_scanning or self.is_downloading_metadata:
+            return
+
+        if not self._get_active_tmdb_api_key():
+            if self._ask_yes_no_dialog(
+                "TMDB key required",
+                "No TMDB API key is configured.\n\n"
+                "Open the key form now?",
+            ):
+                self._open_tmdb_key_dialog()
+            return
+
+        selected_entry = self._get_selected_video_entry()
+        if selected_entry is None:
+            self._show_warning_dialog("Notice", "Select a video first.")
+            return
+        if not selected_entry.paths:
+            self._show_warning_dialog("Notice", "No valid path found for this entry.")
+            return
+
+        description_path, cover_path = self._get_metadata_sidecar_paths(selected_entry)
+        existing_targets = [
+            str(path)
+            for path in (description_path, cover_path)
+            if path.is_file()
+        ]
+        if existing_targets:
+            overwrite_message = (
+                "Metadata files already exist and will be overwritten:\n\n"
+                f"{chr(10).join(existing_targets)}\n\nContinue?"
+            )
+            if not self._ask_yes_no_dialog("Overwrite metadata", overwrite_message):
+                return
+
+        self.is_downloading_metadata = True
+        self.download_metadata_button.configure(state="disabled")
+        self.status_var.set("Downloading metadata ...")
+        worker = threading.Thread(
+            target=self._download_metadata_worker,
+            args=(selected_entry, description_path, cover_path),
+            daemon=True,
+        )
+        worker.start()
+
+    def _download_metadata_worker(
+        self,
+        entry: VideoEntry,
+        description_path: Path,
+        cover_path: Path,
+    ) -> None:
+        try:
+            metadata = self._fetch_metadata_from_tmdb(entry)
+            self._write_nfo_file(description_path, metadata)
+            cover_saved = self._download_cover_image(metadata, cover_path)
+        except Exception as exc:  # pragma: no cover
+            error_message = str(exc)
+            self.after(0, lambda msg=error_message: self._metadata_download_failed(msg))
+            return
+
+        self.after(
+            0,
+            lambda: self._metadata_download_finished(
+                entry=entry,
+                description_path=description_path,
+                cover_path=cover_path,
+                cover_saved=cover_saved,
+            ),
+        )
+
+    def _metadata_download_finished(
+        self,
+        entry: VideoEntry,
+        description_path: Path,
+        cover_path: Path,
+        cover_saved: bool,
+    ) -> None:
+        self.is_downloading_metadata = False
+        if not self.is_scanning:
+            self.download_metadata_button.configure(state="normal")
+
+        cover_message = f" + {cover_path.name}" if cover_saved else ""
+        self.status_var.set(f"Metadata saved: {description_path.name}{cover_message}")
+
+        selected_entry = self._get_selected_video_entry()
+        if (
+            selected_entry is not None
+            and selected_entry.paths
+            and entry.paths
+            and selected_entry.paths[0] == entry.paths[0]
+        ):
+            self._show_video_details(selected_entry)
+
+    def _metadata_download_failed(self, error_message: str) -> None:
+        self.is_downloading_metadata = False
+        if not self.is_scanning:
+            self.download_metadata_button.configure(state="normal")
+        self.status_var.set("Metadata download failed")
+        self._show_error_dialog("Metadata download failed", error_message)
+
+    def _fetch_metadata_from_tmdb(self, entry: VideoEntry) -> dict[str, str]:
+        api_key = self._get_active_tmdb_api_key()
+        if not api_key:
+            raise RuntimeError(
+                "TMDB API key is not configured.\n\n"
+                "Use 'Set TMDB key' in the app or set an environment variable:\n"
+                "PowerShell: $env:TMDB_API_KEY = '<your_key>'"
+            )
+
+        search_title, release_year = self._build_movie_search_query(entry)
+        if not search_title:
+            raise RuntimeError("Could not build a search title for this movie.")
+
+        search_params = {
+            "api_key": api_key,
+            "query": search_title,
+            "include_adult": "false",
+        }
+        if release_year:
+            search_params["year"] = release_year
+
+        search_payload = self._tmdb_request_json("/search/movie", search_params)
+        raw_results = search_payload.get("results", [])
+        if not isinstance(raw_results, list) or not raw_results:
+            raise RuntimeError(f"No TMDB match found for '{search_title}'.")
+
+        movie_candidate = self._select_tmdb_result(raw_results, release_year)
+        movie_id = movie_candidate.get("id")
+        if not isinstance(movie_id, int):
+            raise RuntimeError("TMDB response does not contain a valid movie id.")
+
+        details = self._tmdb_request_json(
+            f"/movie/{movie_id}",
+            {
+                "api_key": api_key,
+                "language": self.TMDB_LANGUAGES[0],
+            },
+        )
+        if not isinstance(details, dict):
+            raise RuntimeError("TMDB details response is invalid.")
+
+        overview = str(details.get("overview", "")).strip()
+        if not overview and len(self.TMDB_LANGUAGES) > 1:
+            fallback_details = self._tmdb_request_json(
+                f"/movie/{movie_id}",
+                {
+                    "api_key": api_key,
+                    "language": self.TMDB_LANGUAGES[1],
+                },
+            )
+            if isinstance(fallback_details, dict):
+                overview = str(fallback_details.get("overview", "")).strip() or overview
+                if not details.get("poster_path") and fallback_details.get("poster_path"):
+                    details["poster_path"] = fallback_details.get("poster_path")
+
+        release_date = str(details.get("release_date", "")).strip()
+        year_text = release_date[:4] if len(release_date) >= 4 else (release_year or "")
+        poster_path = str(details.get("poster_path", "")).strip()
+        poster_url = (
+            f"{self.TMDB_IMAGE_BASE_URL}{poster_path}"
+            if poster_path.startswith("/")
+            else ""
+        )
+        rating_value = details.get("vote_average")
+        rating_text = ""
+        if isinstance(rating_value, (int, float)):
+            rating_text = f"{float(rating_value):.1f}"
+
+        return {
+            "title": str(details.get("title", "")).strip() or search_title,
+            "original_title": str(details.get("original_title", "")).strip(),
+            "overview": overview,
+            "year": year_text,
+            "rating": rating_text,
+            "tmdb_id": str(movie_id),
+            "release_date": release_date,
+            "poster_url": poster_url,
+        }
+
+    def _tmdb_request_json(self, endpoint: str, params: dict[str, str]) -> dict[str, object]:
+        query = urlencode(params)
+        url = f"{self.TMDB_API_BASE_URL}{endpoint}?{query}"
+        request = Request(url, headers={"User-Agent": "VideoVault/0.5.2"})
+        try:
+            with urlopen(request, timeout=20) as response:
+                payload = response.read()
+        except HTTPError as exc:
+            raise RuntimeError(f"TMDB request failed ({exc.code}).") from exc
+        except URLError as exc:
+            raise RuntimeError(f"TMDB connection failed: {exc.reason}") from exc
+
+        try:
+            parsed_payload = json.loads(payload.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise RuntimeError("TMDB response could not be parsed.") from exc
+
+        if not isinstance(parsed_payload, dict):
+            raise RuntimeError("TMDB response has an unexpected format.")
+        return parsed_payload
+
+    @staticmethod
+    def _select_tmdb_result(
+        results: list[object],
+        release_year: str | None,
+    ) -> dict[str, object]:
+        valid_results = [item for item in results if isinstance(item, dict)]
+        if not valid_results:
+            raise RuntimeError("TMDB did not return valid movie results.")
+
+        if release_year:
+            year_matched = [
+                item
+                for item in valid_results
+                if str(item.get("release_date", "")).startswith(release_year)
+            ]
+            if year_matched:
+                return year_matched[0]
+
+        return valid_results[0]
+
+    @staticmethod
+    def _build_movie_search_query(entry: VideoEntry) -> tuple[str, str | None]:
+        candidates: list[str] = []
+        if entry.paths:
+            candidates.append(Path(entry.paths[0]).parent.name)
+        candidates.append(Path(entry.name).stem)
+
+        for candidate in candidates:
+            compact = candidate.strip()
+            if not compact:
+                continue
+
+            year_match = re.search(r"(19|20)\d{2}", compact)
+            year = year_match.group(0) if year_match else None
+
+            cleaned = re.sub(r"[\[\(](19|20)\d{2}[\]\)]", " ", compact)
+            cleaned = re.sub(r"\b(19|20)\d{2}\b", " ", cleaned)
+            cleaned = re.sub(r"[._]+", " ", cleaned)
+            cleaned = re.sub(r"\s+", " ", cleaned).strip(" -_.")
+            if cleaned:
+                return cleaned, year
+
+        return "", None
+
+    @staticmethod
+    def _get_metadata_sidecar_paths(entry: VideoEntry) -> tuple[Path, Path]:
+        if not entry.paths:
+            raise RuntimeError("Entry does not contain any file path.")
+
+        movie_dir = Path(entry.paths[0]).resolve().parent
+        return movie_dir / "movie.nfo", movie_dir / "poster.jpg"
+
+    @staticmethod
+    def _write_nfo_file(path: Path, metadata: dict[str, str]) -> None:
+        movie = ET.Element("movie")
+
+        def add_node(tag: str, key: str) -> None:
+            value = metadata.get(key, "").strip()
+            if value:
+                ET.SubElement(movie, tag).text = value
+
+        add_node("title", "title")
+        add_node("originaltitle", "original_title")
+        add_node("year", "year")
+        add_node("plot", "overview")
+        add_node("outline", "overview")
+        add_node("rating", "rating")
+        add_node("premiered", "release_date")
+        add_node("tmdbid", "tmdb_id")
+
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tree = ET.ElementTree(movie)
+        tree.write(path, encoding="utf-8", xml_declaration=True)
+
+    @staticmethod
+    def _download_cover_image(metadata: dict[str, str], target_path: Path) -> bool:
+        poster_url = metadata.get("poster_url", "").strip()
+        if not poster_url:
+            return False
+
+        request = Request(poster_url, headers={"User-Agent": "VideoVault/0.5.2"})
+        try:
+            with urlopen(request, timeout=20) as response:
+                image_data = response.read()
+        except (HTTPError, URLError, OSError):
+            return False
+
+        if not image_data:
+            return False
+
+        try:
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            target_path.write_bytes(image_data)
+        except OSError:
+            return False
+        return True
+
+    def _get_active_tmdb_api_key(self) -> str:
+        configured_key = self.tmdb_api_key.strip()
+        if configured_key:
+            return configured_key
+
+        return os.environ.get("TMDB_API_KEY", "").strip()
+
+    def _open_tmdb_key_dialog(self) -> None:
+        dialog = ctk.CTkToplevel(self)
+        dialog.title("TMDB API key")
+        dialog.resizable(False, False)
+        dialog.transient(self)
+
+        content = ctk.CTkFrame(dialog)
+        content.grid(row=0, column=0, padx=14, pady=14, sticky="nsew")
+        content.grid_columnconfigure(0, weight=1)
+
+        ctk.CTkLabel(
+            content,
+            text="Enter your TMDB API key.",
+            anchor="w",
+            justify="left",
+        ).grid(row=0, column=0, sticky="w")
+
+        key_entry = ctk.CTkEntry(content, width=420, show="*")
+        key_entry.grid(row=1, column=0, pady=(8, 6), sticky="ew")
+        if self.tmdb_api_key:
+            key_entry.insert(0, self.tmdb_api_key)
+        elif os.environ.get("TMDB_API_KEY", "").strip():
+            key_entry.insert(0, os.environ["TMDB_API_KEY"].strip())
+
+        show_key_var = ctk.BooleanVar(value=False)
+
+        def toggle_show_key() -> None:
+            key_entry.configure(show="" if show_key_var.get() else "*")
+
+        ctk.CTkCheckBox(
+            content,
+            text="Show key",
+            variable=show_key_var,
+            onvalue=True,
+            offvalue=False,
+            command=toggle_show_key,
+        ).grid(row=2, column=0, pady=(0, 6), sticky="w")
+
+        ctk.CTkLabel(
+            content,
+            text=(
+                "The key is stored in the local file 'videovault_data.json'.\n"
+                "If no key is stored, the app will use TMDB_API_KEY from the environment."
+            ),
+            justify="left",
+            anchor="w",
+            wraplength=460,
+        ).grid(row=3, column=0, pady=(0, 8), sticky="w")
+
+        button_row = ctk.CTkFrame(content, fg_color="transparent")
+        button_row.grid(row=4, column=0, sticky="e")
+
+        def close_dialog() -> None:
+            if dialog.winfo_exists():
+                try:
+                    dialog.grab_release()
+                except Exception:
+                    pass
+                dialog.destroy()
+
+        def save_key() -> None:
+            entered_key = key_entry.get().strip()
+            if not entered_key:
+                self._show_warning_dialog(
+                    "TMDB API key",
+                    "Enter a key or use 'Clear saved key'.",
+                )
+                return
+
+            self.tmdb_api_key = entered_key
+            self._save_state()
+            self.status_var.set("TMDB key saved")
+            close_dialog()
+
+        def clear_key() -> None:
+            self.tmdb_api_key = ""
+            self._save_state()
+            self.status_var.set("Saved TMDB key cleared")
+            close_dialog()
+
+        ctk.CTkButton(
+            button_row,
+            text="Clear saved key",
+            width=140,
+            command=clear_key,
+        ).grid(row=0, column=0, padx=(0, 6))
+        ctk.CTkButton(
+            button_row,
+            text="Cancel",
+            width=100,
+            command=close_dialog,
+        ).grid(row=0, column=1, padx=(0, 6))
+        ctk.CTkButton(
+            button_row,
+            text="Save",
+            width=100,
+            command=save_key,
+        ).grid(row=0, column=2)
+
+        dialog.protocol("WM_DELETE_WINDOW", close_dialog)
+        self._center_dialog(dialog)
+        dialog.grab_set()
+        dialog.focus_force()
+        key_entry.focus_set()
+        dialog.wait_window()
+
+    def _get_selected_video_entry(self) -> VideoEntry | None:
+        selection = self.video_listbox.curselection()
+        if not selection:
+            return None
+
+        selected_index = selection[0]
+        return self.row_to_entry.get(selected_index)
 
     def _find_description_file(self, video_path: Path) -> Path | None:
         directory = video_path.parent
@@ -1407,6 +1876,7 @@ class VideoVaultApp(ctk.CTk):
             last_scan_at=self.last_scan_at,
             videos=self.video_entries,
             appearance_mode=self.appearance_mode,
+            tmdb_api_key=self.tmdb_api_key,
         )
 
     def _on_duplicate_mode_changed(self) -> None:

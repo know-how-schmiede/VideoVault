@@ -4,7 +4,7 @@ VideoVault is a desktop app built with Python and `customtkinter` to manage vide
 
 ## Current Version
 
-- `0.5.2`
+- `0.6.0`
 
 ## Features
 
@@ -16,9 +16,29 @@ VideoVault is a desktop app built with Python and `customtkinter` to manage vide
 - Visible progress bar while scanning
 - Detail view with all found paths per video
 - Clickable paths in the detail view to open videos in the default player
+- Per-path action to open the parent folder in the file manager (`Open folder`)
 - Movie metadata section below details with local description (`.nfo`/`.txt` sidecar files) and cover image (`poster/folder/cover` images)
+- Download movie metadata from TMDB directly in the app (`Download from internet`)
+- In-app TMDB API key form (`Set TMDB key`) with local persistence
 - Local persistence in `videovault_data.json`
 - Background scanning via `threading` to keep the UI responsive
+
+## Internet Metadata Download
+
+- Provider: TMDB API
+- API key setup:
+  - In-app: button `Set TMDB key` (saved locally in `videovault_data.json`)
+  - Alternatively via environment variable: `TMDB_API_KEY`
+- Download target location (recommended and implemented): directly next to the movie file in the movie folder
+  - Description: `movie.nfo`
+  - Cover: `poster.jpg`
+
+Example (PowerShell):
+
+```powershell
+$env:TMDB_API_KEY = "your_tmdb_api_key"
+python src/main.py
+```
 
 ## Theme Notes (Light/Dark)
 
