@@ -1,69 +1,73 @@
 # VideoVault
 
-VideoVault ist eine Desktop-App auf Basis von Python und `customtkinter`, um Videos aus mehreren Verzeichnissen zu verwalten.
+VideoVault is a desktop app built with Python and `customtkinter` to manage videos across multiple directories.
 
-## Funktionen
+## Current Version
 
-- Verwaltung mehrerer Quell-Verzeichnisse
-- Anzeige der aktuellen Anzahl hinterlegter Quell-Verzeichnisse
-- Import und Export der Verzeichnisliste (`.json` oder `.txt`), Exportname frei waehlbar
-- Rekursiver Scan auf Video-Dateien (`.mp4`, `.mkv`, `.avi`, `.mov`)
-- Duplikat-Erkennung nach Dateiname oder optional nach uebergeordnetem Verzeichnisnamen, jeweils optional kombiniert mit Dateigroesse
-- Sichtbarer Fortschrittsbalken waehrend des Scan-Vorgangs
-- Detailansicht mit allen gefundenen Pfaden pro Video
-- Klickbare Pfade in der Detailansicht zum direkten Oeffnen im Standard-Videoplayer
-- Lokale Persistenz in `videovault_data.json`
-- Hintergrund-Scan mit `threading`, damit die GUI reaktionsfaehig bleibt
+- `0.5.1`
 
-## Design-Hinweise (Hell/Dunkel)
+## Features
 
-- Die App-Oberflaeche selbst (Frames, Listen, Scrollbars, Progressbar) wird in `customtkinter` fuer Hell/Dunkel umgeschaltet.
-- Die native Windows-Titelleiste wird auf unterstuetzten Systemen ebenfalls auf Hell/Dunkel gesetzt.
-- Info-, Warn-, Fehler- und Ja/Nein-Dialoge werden als eigene `CTkToplevel`-Dialoge angezeigt und folgen dem gewaehlten Theme.
-- Datei-Auswahlfenster (`tkinter.filedialog`) sind weiterhin systemeigene Dialoge und lassen sich nicht vollstaendig im `customtkinter`-Look stylen.
-- Dadurch kann es je nach Windows-Version und Systemeinstellungen vorkommen, dass einzelne Datei-Dialogfenster optisch heller wirken als die App.
-- Fuer ein komplett einheitliches Dunkel-Design waere ein eigener Dateibrowser innerhalb der App notwendig.
+- Manage multiple source directories
+- Show the current number of configured source directories
+- Import and export the directory list (`.json` or `.txt`) with a custom export filename
+- Recursive scan for video files (`.mp4`, `.mkv`, `.avi`, `.mov`)
+- Duplicate detection by filename, or optionally by parent directory name, each optionally combined with file size
+- Visible progress bar while scanning
+- Detail view with all found paths per video
+- Clickable paths in the detail view to open videos in the default player
+- Local persistence in `videovault_data.json`
+- Background scanning via `threading` to keep the UI responsive
 
-## Voraussetzungen
+## Theme Notes (Light/Dark)
 
-- Windows mit PowerShell
-- Python 3.13+ (empfohlen)
+- The app UI itself (frames, lists, scrollbars, progress bar) switches between light and dark mode using `customtkinter`.
+- The native Windows title bar is also switched to light/dark on supported systems.
+- Info, warning, error, and yes/no dialogs are custom `CTkToplevel` dialogs and follow the selected theme.
+- File dialogs (`tkinter.filedialog`) are still native system dialogs and cannot be fully styled like `customtkinter`.
+- Depending on your Windows version and system settings, some file dialogs may look brighter than the app.
+- For a fully uniform dark look, a custom in-app file browser would be required.
+
+## Requirements
+
+- Windows with PowerShell
+- Python 3.13+ (recommended)
 
 ## Installation
 
-1. Virtuelle Umgebung erstellen:
+1. Create a virtual environment:
    ```powershell
    python -m venv .venv
    ```
-2. Virtuelle Umgebung aktivieren:
+2. Activate the virtual environment:
    ```powershell
    & .\.venv\Scripts\Activate.ps1
    ```
-3. Falls Execution Policy blockt:
+3. If execution policy blocks activation:
    ```powershell
    Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
    & .\.venv\Scripts\Activate.ps1
    ```
-4. Abhaengigkeiten installieren:
+4. Install dependencies:
    ```powershell
    python -m pip install -r requirements.txt
    ```
 
-## Anwendung starten
+## Run the App
 
 ```powershell
 python main.py
 ```
 
-## EXE erstellen (optional)
+## Build EXE (Optional)
 
 ```powershell
 pyinstaller --onefile --windowed --name VideoVault main.py
 ```
 
-## Projektrelevante Dateien
+## Project Files
 
-- `main.py`: GUI und Anwendungslogik
-- `version.py`: Zentrale Versions- und Programmnamen-Definition
-- `version.md`: Version-Historie
-- `requirements.txt`: Python-Abhaengigkeiten
+- `main.py`: GUI and application logic
+- `version.py`: Central version and app-name definitions
+- `version.md`: Version history
+- `requirements.txt`: Python dependencies

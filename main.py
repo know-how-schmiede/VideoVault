@@ -131,7 +131,7 @@ class VideoScanner:
             seen_directories.add(normalized)
 
             if not os.path.isdir(directory):
-                warnings.append(f"Verzeichnis nicht gefunden: {directory}")
+                warnings.append(f"Directory not found: {directory}")
                 continue
 
             for root, _, files in os.walk(directory):
@@ -144,7 +144,7 @@ class VideoScanner:
                     try:
                         size = os.path.getsize(full_path)
                     except OSError:
-                        warnings.append(f"Datei nicht lesbar: {full_path}")
+                        warnings.append(f"File not readable: {full_path}")
                         continue
 
                     if duplicate_by_parent_dir:
@@ -163,7 +163,7 @@ class VideoScanner:
 
         entries: list[VideoEntry] = []
         for group in grouped.values():
-            name = group["name"] if isinstance(group["name"], str) else "Unbekannt"
+            name = group["name"] if isinstance(group["name"], str) else "Unknown"
             items = group["items"] if isinstance(group["items"], list) else []
             item_pairs = [
                 (path, size)
@@ -194,13 +194,13 @@ class VideoVaultApp(ctk.CTk):
     DATA_FILE = "videovault_data.json"
     APPEARANCE_LABEL_TO_MODE = {
         "System": "System",
-        "Hell": "Light",
-        "Dunkel": "Dark",
+        "Light": "Light",
+        "Dark": "Dark",
     }
     APPEARANCE_MODE_TO_LABEL = {
         "System": "System",
-        "Light": "Hell",
-        "Dark": "Dunkel",
+        "Light": "Light",
+        "Dark": "Dark",
     }
 
     def __init__(self) -> None:
@@ -220,11 +220,11 @@ class VideoVaultApp(ctk.CTk):
 
         self.duplicate_by_size_var = ctk.BooleanVar(value=False)
         self.duplicate_by_parent_dir_var = ctk.BooleanVar(value=False)
-        self.status_var = ctk.StringVar(value="Bereit")
+        self.status_var = ctk.StringVar(value="Ready")
         self.stats_videos_var = ctk.StringVar(value="0")
-        self.stats_last_scan_var = ctk.StringVar(value="Nie")
+        self.stats_last_scan_var = ctk.StringVar(value="Never")
         self.stats_duplicates_var = ctk.StringVar(value="0")
-        self.directory_count_var = ctk.StringVar(value="Anzahl: 0")
+        self.directory_count_var = ctk.StringVar(value="Count: 0")
         self.appearance_mode = "System"
         self.appearance_mode_var = ctk.StringVar(value="System")
         self.browse_initial_dir: str | None = None
@@ -254,7 +254,7 @@ class VideoVaultApp(ctk.CTk):
 
         self.duplicate_checkbox = ctk.CTkCheckBox(
             top_bar,
-            text="Duplikat-Check mit Dateigroesse",
+            text="Duplicate check by file size",
             variable=self.duplicate_by_size_var,
             onvalue=True,
             offvalue=False,
@@ -264,7 +264,7 @@ class VideoVaultApp(ctk.CTk):
 
         self.duplicate_parent_checkbox = ctk.CTkCheckBox(
             top_bar,
-            text="Duplikat-Basis: uebergeordnetes Verzeichnis",
+            text="Duplicate key: parent directory",
             variable=self.duplicate_by_parent_dir_var,
             onvalue=True,
             offvalue=False,
@@ -272,7 +272,7 @@ class VideoVaultApp(ctk.CTk):
         )
         self.duplicate_parent_checkbox.grid(row=0, column=2, padx=8, pady=12, sticky="e")
 
-        ctk.CTkLabel(top_bar, text="Design").grid(row=0, column=3, padx=(8, 4), pady=12, sticky="e")
+        ctk.CTkLabel(top_bar, text="Theme").grid(row=0, column=3, padx=(8, 4), pady=12, sticky="e")
         self.appearance_menu = ctk.CTkOptionMenu(
             top_bar,
             values=list(self.APPEARANCE_LABEL_TO_MODE.keys()),
@@ -310,10 +310,10 @@ class VideoVaultApp(ctk.CTk):
         header.grid(row=0, column=0, padx=12, pady=(12, 6), sticky="ew")
         header.grid_columnconfigure(0, weight=1)
 
-        ctk.CTkLabel(header, text="Quell-Verzeichnisse").grid(row=0, column=0, sticky="w")
+        ctk.CTkLabel(header, text="Source directories").grid(row=0, column=0, sticky="w")
         ctk.CTkLabel(header, textvariable=self.directory_count_var).grid(row=0, column=1, sticky="e")
 
-        self.directory_entry = ctk.CTkEntry(panel, placeholder_text="Pfad eingeben und Enter druecken")
+        self.directory_entry = ctk.CTkEntry(panel, placeholder_text="Enter path and press Enter")
         self.directory_entry.grid(row=1, column=0, padx=12, pady=(0, 6), sticky="ew")
         self.directory_entry.bind("<Return>", lambda _event: self._add_directory_from_entry())
 
@@ -322,7 +322,7 @@ class VideoVaultApp(ctk.CTk):
         controls.grid_columnconfigure(0, weight=1)
 
         self.browse_button = ctk.CTkButton(
-            controls, text="Ordner waehlen", command=self._browse_directory
+            controls, text="Choose folder", command=self._browse_directory
         )
         self.browse_button.grid(row=0, column=0, sticky="ew")
 
@@ -345,12 +345,12 @@ class VideoVaultApp(ctk.CTk):
         footer.grid_columnconfigure((0, 1), weight=1)
 
         self.remove_button = ctk.CTkButton(
-            footer, text="Entfernen", command=self._remove_selected_directory
+            footer, text="Remove", command=self._remove_selected_directory
         )
         self.remove_button.grid(row=0, column=0, padx=(0, 4), sticky="ew")
 
         self.clear_button = ctk.CTkButton(
-            footer, text="Alle loeschen", command=self._clear_directories
+            footer, text="Clear all", command=self._clear_directories
         )
         self.clear_button.grid(row=0, column=1, padx=(4, 0), sticky="ew")
 
@@ -372,7 +372,7 @@ class VideoVaultApp(ctk.CTk):
         panel.grid_columnconfigure(0, weight=1)
         panel.grid_rowconfigure(1, weight=1)
 
-        ctk.CTkLabel(panel, text="Gefundene Videos").grid(
+        ctk.CTkLabel(panel, text="Found videos").grid(
             row=0, column=0, padx=12, pady=(12, 8), sticky="w"
         )
 
@@ -406,27 +406,27 @@ class VideoVaultApp(ctk.CTk):
         self.details_box.bind("<Motion>", self._on_details_hover, add="+")
         self.details_box.bind("<Leave>", self._on_details_leave, add="+")
         self.details_box.bind("<Key>", lambda _event: "break")
-        self._set_details_text("Waehle ein Video, um die gefundenen Pfade anzuzeigen.")
+        self._set_details_text("Select a video to show the found paths.")
 
-        ctk.CTkLabel(panel, text="Statistik").grid(row=2, column=0, padx=12, pady=(0, 6), sticky="w")
+        ctk.CTkLabel(panel, text="Statistics").grid(row=2, column=0, padx=12, pady=(0, 6), sticky="w")
 
         stats_frame = ctk.CTkFrame(panel)
         stats_frame.grid(row=3, column=0, padx=12, pady=(0, 12), sticky="ew")
         stats_frame.grid_columnconfigure(0, weight=1)
 
-        ctk.CTkLabel(stats_frame, text="Gefundene Videos:").grid(
+        ctk.CTkLabel(stats_frame, text="Found videos:").grid(
             row=0, column=0, padx=10, pady=(10, 4), sticky="w"
         )
         ctk.CTkLabel(stats_frame, textvariable=self.stats_videos_var).grid(
             row=0, column=1, padx=10, pady=(10, 4), sticky="e"
         )
-        ctk.CTkLabel(stats_frame, text="Letzter Scan:").grid(
+        ctk.CTkLabel(stats_frame, text="Last scan:").grid(
             row=1, column=0, padx=10, pady=4, sticky="w"
         )
         ctk.CTkLabel(stats_frame, textvariable=self.stats_last_scan_var).grid(
             row=1, column=1, padx=10, pady=4, sticky="e"
         )
-        ctk.CTkLabel(stats_frame, text="Gefundene Duplikate:").grid(
+        ctk.CTkLabel(stats_frame, text="Duplicate groups:").grid(
             row=2, column=0, padx=10, pady=(4, 10), sticky="w"
         )
         ctk.CTkLabel(stats_frame, textvariable=self.stats_duplicates_var).grid(
@@ -454,7 +454,7 @@ class VideoVaultApp(ctk.CTk):
         self._refresh_video_list()
         if videos:
             total_files = sum(len(item.paths) for item in videos)
-            self.status_var.set(f"{len(videos)} Gruppen / {total_files} Dateien geladen")
+            self.status_var.set(f"{len(videos)} groups / {total_files} files loaded")
 
     def _on_close(self) -> None:
         self._save_state()
@@ -582,10 +582,10 @@ class VideoVaultApp(ctk.CTk):
             title=title,
             message=message,
             variant="warning",
-            buttons=("Ja", "Nein"),
-            cancel_value="Nein",
+            buttons=("Yes", "No"),
+            cancel_value="No",
         )
-        return response == "Ja"
+        return response == "Yes"
 
     def _add_directory_from_entry(self) -> None:
         raw_path = self.directory_entry.get().strip()
@@ -595,7 +595,7 @@ class VideoVaultApp(ctk.CTk):
             self.directory_entry.delete(0, END)
 
     def _browse_directory(self) -> None:
-        dialog_options: dict[str, str] = {"title": "Quell-Verzeichnis waehlen"}
+        dialog_options: dict[str, str] = {"title": "Choose source directory"}
         if self.browse_initial_dir and os.path.isdir(self.browse_initial_dir):
             dialog_options["initialdir"] = self.browse_initial_dir
 
@@ -610,7 +610,7 @@ class VideoVaultApp(ctk.CTk):
             return False
 
         if must_exist and not os.path.isdir(path):
-            self._show_error_dialog("Ungueltiger Pfad", f"Verzeichnis nicht gefunden:\n{path}")
+            self._show_error_dialog("Invalid path", f"Directory not found:\n{path}")
             return False
 
         normalized = os.path.normcase(path)
@@ -639,8 +639,8 @@ class VideoVaultApp(ctk.CTk):
         if self.directory_listbox.size() == 0:
             return
         if not self._ask_yes_no_dialog(
-            "Sicherheitsabfrage",
-            "Sollen wirklich alle Verzeichnisse geloescht werden?",
+            "Confirm action",
+            "Do you really want to remove all directories?",
         ):
             return
         self.directory_listbox.delete(0, END)
@@ -649,11 +649,11 @@ class VideoVaultApp(ctk.CTk):
 
     def _import_directories(self) -> None:
         file_path = filedialog.askopenfilename(
-            title="Verzeichnisliste importieren",
+            title="Import directory list",
             filetypes=[
-                ("JSON-Dateien", "*.json"),
-                ("Textdateien", "*.txt"),
-                ("Alle Dateien", "*.*"),
+                ("JSON files", "*.json"),
+                ("Text files", "*.txt"),
+                ("All files", "*.*"),
             ],
         )
         if not file_path:
@@ -680,33 +680,33 @@ class VideoVaultApp(ctk.CTk):
 
         if added:
             self._save_state()
-            self.status_var.set(f"Import abgeschlossen: {added} Verzeichnisse hinzugefuegt")
+            self.status_var.set(f"Import completed: {added} directories added")
 
         self._show_info_dialog(
             "Import",
             (
-                "Import abgeschlossen.\n"
-                f"Hinzugefuegt: {added}\n"
-                f"Bereits vorhanden: {duplicates}\n"
-                f"Ungueltig oder nicht gefunden: {invalid_or_missing}"
+                "Import completed.\n"
+                f"Added: {added}\n"
+                f"Already present: {duplicates}\n"
+                f"Invalid or missing: {invalid_or_missing}"
             ),
         )
 
     def _export_directories(self) -> None:
         directories = self._get_directories()
         if not directories:
-            self._show_warning_dialog("Export", "Keine Verzeichnisse zum Export vorhanden.")
+            self._show_warning_dialog("Export", "No directories available for export.")
             return
 
-        suggested_name = f"videovault_verzeichnisse_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+        suggested_name = f"videovault_directories_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
         file_path = filedialog.asksaveasfilename(
-            title="Verzeichnisliste exportieren",
+            title="Export directory list",
             defaultextension=".json",
             initialfile=suggested_name,
             filetypes=[
-                ("JSON-Dateien", "*.json"),
-                ("Textdateien", "*.txt"),
-                ("Alle Dateien", "*.*"),
+                ("JSON files", "*.json"),
+                ("Text files", "*.txt"),
+                ("All files", "*.*"),
             ],
         )
         if not file_path:
@@ -729,14 +729,14 @@ class VideoVaultApp(ctk.CTk):
                 )
         except OSError as exc:
             self._show_error_dialog(
-                "Export fehlgeschlagen",
-                f"Datei konnte nicht gespeichert werden:\n{exc}",
+                "Export failed",
+                f"File could not be saved:\n{exc}",
             )
             return
 
         self._show_info_dialog(
             "Export",
-            f"{len(directories)} Verzeichnisse exportiert:\n{str(export_path)}",
+            f"{len(directories)} directories exported:\n{str(export_path)}",
         )
 
     def _load_directories_from_file(self, file_path: str) -> list[str] | None:
@@ -745,8 +745,8 @@ class VideoVaultApp(ctk.CTk):
             content = import_path.read_text(encoding="utf-8-sig")
         except (OSError, UnicodeDecodeError) as exc:
             self._show_error_dialog(
-                "Import fehlgeschlagen",
-                f"Datei konnte nicht gelesen werden:\n{exc}",
+                "Import failed",
+                f"File could not be read:\n{exc}",
             )
             return None
 
@@ -754,7 +754,7 @@ class VideoVaultApp(ctk.CTk):
             try:
                 payload = json.loads(content)
             except json.JSONDecodeError:
-                self._show_error_dialog("Import fehlgeschlagen", "JSON-Datei ist ungueltig.")
+                self._show_error_dialog("Import failed", "JSON file is invalid.")
                 return None
 
             raw_directories: object
@@ -767,8 +767,8 @@ class VideoVaultApp(ctk.CTk):
 
             if not isinstance(raw_directories, list):
                 self._show_error_dialog(
-                    "Import fehlgeschlagen",
-                    "JSON muss eine Liste sein oder ein Feld 'directories' enthalten.",
+                    "Import failed",
+                    "JSON must be a list or contain a 'directories' field.",
                 )
                 return None
 
@@ -777,7 +777,7 @@ class VideoVaultApp(ctk.CTk):
         return [line.strip() for line in content.splitlines() if line.strip()]
 
     def _update_directory_count(self) -> None:
-        self.directory_count_var.set(f"Anzahl: {self.directory_listbox.size()}")
+        self.directory_count_var.set(f"Count: {self.directory_listbox.size()}")
 
     def _normalize_appearance_mode(self, raw_mode: str) -> str:
         normalized = raw_mode.strip()
@@ -787,9 +787,9 @@ class VideoVaultApp(ctk.CTk):
             return self.APPEARANCE_LABEL_TO_MODE[normalized]
 
         lowered = normalized.lower()
-        if lowered == "light":
+        if lowered in ("light", "hell"):
             return "Light"
-        if lowered == "dark":
+        if lowered in ("dark", "dunkel"):
             return "Dark"
         return "System"
 
@@ -939,14 +939,14 @@ class VideoVaultApp(ctk.CTk):
         directories = self._get_directories()
         if not directories:
             self._show_warning_dialog(
-                "Hinweis",
-                "Bitte mindestens ein Quell-Verzeichnis hinterlegen.",
+                "Notice",
+                "Please add at least one source directory.",
             )
             return
 
         self.is_scanning = True
         self._set_controls_state(False)
-        self.status_var.set("Scan laeuft ...")
+        self.status_var.set("Scan running ...")
         self._show_scan_progress()
 
         duplicate_by_size = self.duplicate_by_size_var.get()
@@ -975,8 +975,8 @@ class VideoVaultApp(ctk.CTk):
         self.is_scanning = False
         self._hide_scan_progress()
         self._set_controls_state(True)
-        self.status_var.set("Scan fehlgeschlagen")
-        self._show_error_dialog("Scan-Fehler", error_message)
+        self.status_var.set("Scan failed")
+        self._show_error_dialog("Scan error", error_message)
 
     def _scan_finished(self, videos: list[VideoEntry], warnings: list[str]) -> None:
         self.is_scanning = False
@@ -991,14 +991,14 @@ class VideoVaultApp(ctk.CTk):
         duplicate_groups = sum(1 for item in videos if item.is_duplicate)
         total_files = sum(len(item.paths) for item in videos)
         self.status_var.set(
-            f"Scan fertig: {len(videos)} Gruppen / {total_files} Dateien / {duplicate_groups} Duplikate"
+            f"Scan finished: {len(videos)} groups / {total_files} files / {duplicate_groups} duplicates"
         )
 
         if warnings:
             preview = "\n".join(warnings[:8])
             if len(warnings) > 8:
-                preview += f"\n... und {len(warnings) - 8} weitere Hinweise"
-            self._show_warning_dialog("Scan-Hinweise", preview)
+                preview += f"\n... and {len(warnings) - 8} more warnings"
+            self._show_warning_dialog("Scan warnings", preview)
 
     def _refresh_video_list(self) -> None:
         self.video_listbox.delete(0, END)
@@ -1015,9 +1015,9 @@ class VideoVaultApp(ctk.CTk):
             self.row_to_entry[row] = item
 
         if not self.video_entries:
-            self._set_details_text("Keine Videos vorhanden. Starte einen Scan.")
+            self._set_details_text("No videos available. Start a scan.")
         else:
-            self._set_details_text("Waehle ein Video, um die gefundenen Pfade anzuzeigen.")
+            self._set_details_text("Select a video to show the found paths.")
         self._update_statistics()
 
     def _format_video_label(self, item: VideoEntry) -> str:
@@ -1027,7 +1027,7 @@ class VideoVaultApp(ctk.CTk):
             if len(unique_sizes) == 1:
                 title = f"{title} ({self._format_size(unique_sizes[0])})"
             else:
-                title = f"{title} (mehrere Groessen)"
+                title = f"{title} (multiple sizes)"
 
         return title
 
@@ -1047,12 +1047,12 @@ class VideoVaultApp(ctk.CTk):
         self._clear_details_box()
 
         header_lines = [
-            f"Titel: {self._get_video_title(entry)}",
-            f"Dateiname: {entry.name}",
-            f"Treffer: {len(entry.paths)}",
-            f"Duplikat: {'Ja' if entry.is_duplicate else 'Nein'}",
+            f"Title: {self._get_video_title(entry)}",
+            f"Filename: {entry.name}",
+            f"Matches: {len(entry.paths)}",
+            f"Duplicate: {'Yes' if entry.is_duplicate else 'No'}",
             "",
-            "Gefundene Pfade (klickbar):",
+            "Found paths (clickable):",
         ]
         self.details_box.insert("1.0", "\n".join(header_lines) + "\n")
 
@@ -1118,7 +1118,7 @@ class VideoVaultApp(ctk.CTk):
     def _open_video_path(self, path: str) -> None:
         normalized_path = os.path.abspath(path)
         if not os.path.isfile(normalized_path):
-            self._show_error_dialog("Datei nicht gefunden", f"Datei nicht gefunden:\n{normalized_path}")
+            self._show_error_dialog("File not found", f"File not found:\n{normalized_path}")
             return
 
         try:
@@ -1130,14 +1130,14 @@ class VideoVaultApp(ctk.CTk):
                 subprocess.Popen(["xdg-open", normalized_path])
         except OSError as exc:
             self._show_error_dialog(
-                "Oeffnen fehlgeschlagen",
-                f"Die Datei konnte nicht geoeffnet werden:\n{normalized_path}\n\n{exc}",
+                "Open failed",
+                f"The file could not be opened:\n{normalized_path}\n\n{exc}",
             )
 
     def _update_statistics(self) -> None:
         found_videos = len(self.video_entries)
         duplicate_groups = sum(1 for item in self.video_entries if item.is_duplicate)
-        last_scan = self.last_scan_at if self.last_scan_at else "Nie"
+        last_scan = self.last_scan_at if self.last_scan_at else "Never"
 
         self.stats_videos_var.set(str(found_videos))
         self.stats_last_scan_var.set(last_scan)
@@ -1158,7 +1158,7 @@ class VideoVaultApp(ctk.CTk):
         if len(unique_parents) == 1:
             return unique_parents[0]
 
-        return f"{unique_parents[0]} (+{len(unique_parents) - 1} weitere Ordner)"
+        return f"{unique_parents[0]} (+{len(unique_parents) - 1} more folders)"
 
     def _save_state(self) -> None:
         self.store.save(

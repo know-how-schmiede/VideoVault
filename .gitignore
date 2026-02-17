@@ -208,3 +208,6 @@ __marimo__/
 
 # VideoVault local data
 videovault_data.json
+
+# VideoVault EXE build artifacts
+VideoVault.exe
